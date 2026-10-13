@@ -191,11 +191,6 @@ npm test           # 97 个单元/集成测试（node:test）
 
 测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。
 
-### 相关文档
-
-- [设计文档](docs/superpowers/specs/2026-10-13-leetcode-cli-design.md)
-- [实施计划](docs/superpowers/plans/2026-10-13-leetcode-cli.md)
-
 VS Code 用户还可以在 `.vscode/mcp.json` 里直接挂同一个 MCP server，用 AI 助手刷题。
 
 ---

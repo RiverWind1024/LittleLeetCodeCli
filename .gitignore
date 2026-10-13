@@ -10,3 +10,7 @@ node_modules/
 
 # 已解决列表缓存
 .lc-cache/
+
+# 解题代码与本地设计文档
+solutions/
+docs/

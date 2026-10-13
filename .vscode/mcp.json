@@ -1,0 +1,25 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "leetcode-session",
+      "description": "LeetCode 中国站 LEETCODE_SESSION Cookie（用于运行/提交代码，可留空先只用查询功能）",
+      "password": true
+    }
+  ],
+  "servers": {
+    "leetcode": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@jinzcdev/leetcode-mcp-server",
+        "--site",
+        "cn"
+      ],
+      "env": {
+        "LEETCODE_SESSION": "${input:leetcode-session}"
+      }
+    }
+  }
+}
