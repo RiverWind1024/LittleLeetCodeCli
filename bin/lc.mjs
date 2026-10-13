@@ -72,7 +72,7 @@ const COMMANDS = {
 
 export function printHelp(out = console.log) {
   out("用法：lc <命令> [选项]");
-  out("（需在 LightLeetCodeCli 项目根目录执行；首次使用先运行 npm link）");
+  out("（需在 LittleLeetCodeCli 项目根目录执行；首次使用先运行 npm link）");
   out("");
   out("命令：");
   const width = Math.max(...Object.values(COMMANDS).map((c) => strWidth(c.usage)));
@@ -950,7 +950,7 @@ export async function cmdSubmit(opts, deps) {
   emit(out, data, st, setExitCode);
 }
 
-const PROJECT_NAME = "light-leetcode-cli";
+const PROJECT_NAME = "little-leetcode-cli";
 
 export function ensureProjectRoot(cwd) {
   const pkgPath = join(cwd, "package.json");
@@ -960,7 +960,7 @@ export function ensureProjectRoot(cwd) {
     } catch { /* 落到下方错误提示 */ }
   }
   throw new Error(
-    `当前目录不是 LightLeetCodeCli 项目根目录：${cwd}\n` +
+    `当前目录不是 LittleLeetCodeCli 项目根目录：${cwd}\n` +
     `请切换到项目根目录后再运行 lc`
   );
 }

@@ -50,7 +50,7 @@ import {
 const tmp = () => mkdtempSync(join(tmpdir(), "lc-"));
 const fakeRoot = () => {
   const dir = tmp();
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "light-leetcode-cli" }));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "little-leetcode-cli" }));
   return dir;
 };
 const PQ = (slug, date, extra = {}) => ({
@@ -1169,7 +1169,7 @@ test("非项目根目录运行时拒绝执行并提示", async () => {
   const cwd = tmp();
   await main(["list"], { cwd, errOut: (s) => errs.push(s), out: () => {} });
   assert.equal(process.exitCode, 1);
-  assert.match(errs.join("\n"), /不是 LightLeetCodeCli 项目根目录/);
+  assert.match(errs.join("\n"), /不是 LittleLeetCodeCli 项目根目录/);
   assert.match(errs.join("\n"), /切换到项目根目录后再运行/);
   process.exitCode = 0;
 });

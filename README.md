@@ -1,10 +1,10 @@
-# 轻量LeetCode CLI
+# 小巧LeetCode CLI
 
 `lc` 是一个零运行时依赖的 CLI（单文件 `bin/lc.mjs`，只用 Node 内置模块），用命令行刷 [leetcode.cn](https://leetcode.cn) 。
 核心是通过 [leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server) 连接 leetcode，
 完成刷题闭环：**列题 → 生成代码文件 → 写代码 → 跑样例 → 提交**。
 
-> 为什么做这个：感觉 vscode 和 IDEA 上的 LeetCode 插件不太好用，干脆自己写一个轻量化的小工具，直接通过终端运行（以及避免老板发现你在刷leetcode）。
+> 为什么做这个：感觉 vscode 和 IDEA 上的 LeetCode 插件不太好用，干脆自己写一个小巧的工具，直接通过终端运行（以及避免老板发现你在刷leetcode）。
 
 
 
@@ -53,7 +53,7 @@ lc run two-sum       # 用默认样例跑一遍
 lc submit two-sum    # 提交
 ```
 
-> **命令受项目根目录约束。** 无论怎么调用，`lc` 都会校验当前目录是不是 LightLeetCodeCli
+> **命令受项目根目录约束。** 无论怎么调用，`lc` 都会校验当前目录是不是 LittleLeetCodeCli
 > 项目根目录，否则报错退出——不会在别处误建 `solutions/` 或误读 `.env`。
 > 不想用 `npm link` 也可以直接 `node bin/lc.mjs <命令>`，
 > 或 `npm run lc -- <命令>`（注意：用 `npm run` 时，命令前的 `--` 不能省）。
@@ -201,7 +201,7 @@ VS Code 用户还可以在 `.vscode/mcp.json` 里直接挂同一个 MCP server�
 |---|---|
 | `lc: command not found` | 还没 `npm link`，或改用 `node bin/lc.mjs <命令>` |
 | `该操作需要登录…` | Cookie 缺失或过期，重新执行 `lc config set session` |
-| `当前目录不是 LightLeetCodeCli 项目根目录` | 不在项目根目录，`cd` 回去再运行 |
+| `当前目录不是 LittleLeetCodeCli 项目根目录` | 不在项目根目录，`cd` 回去再运行 |
 | `未找到本地 MCP server，回退使用 npx` | 本地依赖缺失，跑一次 `npm install` |
 | `MCP server 提前退出` | 依赖损坏，尝试 `rm -rf node_modules && npm install` |
 | `MCP 调用超时` | 调大 `--timeout`，或检查网络 |
