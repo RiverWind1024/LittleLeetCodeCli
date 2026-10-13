@@ -3,7 +3,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, chmodSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { htmlToText, strWidth, parseEnvContent,loadEnv,setEnvVar,unsetEnvVar } from "./utils.js";
+import {
+  htmlToText, strWidth, isChineseEnv, style, parseEnvContent, loadEnv, setEnvVar, unsetEnvVar, writeEnv,
+} from "./utils.js";
 import { renderProgressSummary, renderSolvedTable,renderList,difficultyLabel } from "./render.js";
 
 const COMMANDS = {
@@ -184,31 +186,6 @@ export function mask(v) {
 }
 
 
-
-export function detectColor(stream = process.stdout, env = process.env) {
-  if (env.NO_COLOR !== undefined) return false;
-  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== "0") return true;
-  return Boolean(stream && stream.isTTY);
-}
-
-export function createStyle(enabled) {
-  const wrap = (code) => (s) => (enabled ? `\u001b[${code}m${s}\u001b[0m` : String(s));
-  return {
-    enabled,
-    bold: wrap(1),
-    dim: wrap(2),
-    red: wrap(31),
-    green: wrap(32),
-    yellow: wrap(33),
-    cyan: wrap(36),
-  };
-}
-
-export const style = createStyle(detectColor());
-
-export function isChineseEnv(env = process.env) {
-  return /^zh/i.test(env.LC_ALL || env.LANG || "");
-}
 
 const SOLVED_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const SOLVED_CACHE_FILE = "solved.json";

@@ -67,6 +67,31 @@ export function unsetEnvVar(content, key) {
   return out.join("\n").replace(/\n*$/, "\n");
 }
 
+export function detectColor(stream = process.stdout, env = process.env) {
+  if (env.NO_COLOR !== undefined) return false;
+  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== "0") return true;
+  return Boolean(stream && stream.isTTY);
+}
+
+export function createStyle(enabled) {
+  const wrap = (code) => (s) => (enabled ? `\u001b[${code}m${s}\u001b[0m` : String(s));
+  return {
+    enabled,
+    bold: wrap(1),
+    dim: wrap(2),
+    red: wrap(31),
+    green: wrap(32),
+    yellow: wrap(33),
+    cyan: wrap(36),
+  };
+}
+
+export const style = createStyle(detectColor());
+
+export function isChineseEnv(env = process.env) {
+  return /^zh/i.test(env.LC_ALL || env.LANG || "");
+}
+
 export function strWidth(s) {
   let w = 0;
   for (const ch of String(s)) {
