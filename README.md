@@ -1,8 +1,8 @@
 # 轻量LeetCode CLI
 
 `lc` 是一个零运行时依赖的 CLI（单文件 `bin/lc.mjs`，只用 Node 内置模块），用命令行刷 [leetcode.cn](https://leetcode.cn) 。
-核心是通过 [leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server) 连接 LeetCode，
-完成刷题闭环：**列题 → 生成代码文件 → 跑样例 → 提交**。
+核心是通过 [leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server) 连接 leetcode，
+完成刷题闭环：**列题 → 生成代码文件 → 写代码 → 跑样例 → 提交**。
 
 > 为什么做这个：感觉 vscode 和 IDEA 上的 LeetCode 插件不太好用，干脆自己写一个轻量化的小工具，直接通过终端运行（以及避免老板发现你在刷leetcode）。
 
@@ -10,14 +10,12 @@
 
 ## 特性
 
-- **零运行时依赖** — 单文件 `bin/lc.mjs`，只用 Node 内置模块，`npm install` 只为装 MCP server
+- **零运行时依赖** — 单文件 `bin/lc.mjs`，只用 Node 内置模块，`npm install` 只为装 MCP server，不用了直接删除
 - **完整闭环** — `list` → `show` → `run` → `submit`，全程不出终端
-- **中文题面** — `show` 默认展示中文标题与题面，取不到时自动回退英文
 - **多语言** — python3 / cpp / java / golang / javascript / typescript / rust / c
-- **好看的输出** — 自动配色、带边框表格、判题失败直接给出首个失败用例的输入/期望/实际
 - **随机刷题** — `lc random` 在筛选范围内均匀抽题
+- **已做标记** — 登录后 `list` 显示 ✅/空 状态列，`progress` 查看已解决统计与最近提交
 - **自约束** — 命令只在项目根目录有效，不会在别处误建目录或误读凭据
-- **测试完备** — 75 个测试，全部离线运行
 
 ## 目录
 
@@ -47,7 +45,8 @@
 npm install          # 安装 MCP server 依赖
 npm link             # 把 lc 链接到 PATH（一次性）
 lc init              # 引导配置登录 Cookie
-lc list 二数          # 搜题
+lc list two-sum          # 搜题
+lc progress --limit 10   # 已解决统计与列表（需登录）
 lc random            # 随机抽一题（可加 --difficulty / --tags）
 lc show two-sum      # 下载题目并生成 solution.py（题面默认中文）
 lc run two-sum       # 用默认样例跑一遍
@@ -63,7 +62,8 @@ lc submit two-sum    # 提交
 
 ## 认证
 
-`run` 和 `submit` 需要登录，`list` 和 `show` 不需要。
+`run` 和 `submit` 需要登录，`progress` 同样需要；
+`list` 未登录时只不显示状态列，`show` 不需要登录。
 
 ### 获取 Cookie
 
@@ -81,7 +81,7 @@ lc config unset session    # 移除
 lc config list             # 列出所有键（值脱敏）
 ```
 
-Cookie 存在项目根的 `.env`（权限 `0600`，已在 `.gitignore` 中）：
+Cookie 存在项目根的 `.env`（已在 `.gitignore` 中）：
 
 ```
 LEETCODE_SESSION=<你的cookie>
@@ -103,8 +103,9 @@ LEETCODE_SESSION=<值> lc submit two-sum
 |---|---|
 | `init` | 安装 MCP 依赖；未配置 Cookie 时交互引导写入 |
 | `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（目前仅 `session`） |
-| `list [关键词]` | 搜索题目，输出带边框表格 |
+| `list [关键词]` | 搜索题目，输出带边框表格；登录后含已解决状态列 |
 | `random` | 随机抽取一题（只打印，不生成文件） |
+| `progress` | 已解决题目的统计与列表（需登录）；已解决列表缓存在 `.lc-cache/` |
 | `show <slug>` | 取题目、生成代码文件、打印中文题面 |
 | `run <slug>` | 用题目默认样例运行本地代码 |
 | `submit <slug>` | 提交本地代码 |
@@ -122,9 +123,11 @@ LEETCODE_SESSION=<值> lc submit two-sum
 
 | 选项 | 适用命令 | 说明 |
 |---|---|---|
-| `--difficulty EASY\|MEDIUM\|HARD` | `list` `random` | 难度过滤（大小写不敏感） |
+| `--difficulty EASY\|MEDIUM\|HARD` | `list` `random` `progress` | 难度过滤（大小写不敏感） |
 | `--tags a,b` | `list` `random` | 标签过滤，逗号分隔 |
-| `--limit N` | `list` | 条数，默认 `20` |
+| `--limit N` | `list` `progress` | 条数，默认 `20`（`progress` 按最近提交倒序） |
+| `--offset N` | `progress` | 跳过前 N 条 |
+| `--refresh` | `list` `progress` | 忽略 24h 缓存，强制重新拉取已解决列表 |
 | `--force` | `show` | 覆盖已存在的代码文件 |
 | `--input "..."` | `run` | 自定义测试输入；不给则用题目默认样例 |
 
@@ -165,6 +168,10 @@ solutions/
 - **颜色**：仅在输出到真实终端时启用；重定向到文件或管道时自动去色。
   遵循 `NO_COLOR`（设置即禁用）与 `FORCE_COLOR`（非 `0` 即强制启用）约定。
 - **难度配色**：简单=绿、中等=黄、困难=红；列宽按显示宽度计算，中文占 2 列。
+- **状态列**：登录后 `list` 每行显示状态列，已解决标绿色 ✅；未登录时不显示该列。
+- **标题语言**：`list` 按当前 locale 自动选中文/英文标题（`LC_ALL`/`LANG` 以 zh 开头即中文，`LC_ALL` 优先）。
+- **已解决缓存**：`progress` 与 `list` 把已解决列表缓存到 `.lc-cache/solved.json`（24 小时），
+  刷新失败时静默降级用旧缓存并在 stderr 告警。
 - **判题结果**：输出摘要（状态 / 通过用例 / 耗时 / 内存 / 提交 ID / 详情链接），
   失败时直接给出首个失败用例的输入、期望与实际。判题未通过时退出码为 `1`。
 - **题面语言**：`show` 优先展示中文标题与题面（直连 leetcode.cn 公开接口，无需登录）；
@@ -176,7 +183,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 75 个单元/集成测试（node:test）
+npm test           # 88 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。

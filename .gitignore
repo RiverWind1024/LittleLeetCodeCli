@@ -7,3 +7,6 @@ node_modules/
 
 # 本地私密配置
 .env
+
+# 已解决列表缓存
+.lc-cache/

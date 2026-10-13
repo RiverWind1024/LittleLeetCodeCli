@@ -22,6 +22,17 @@ const COMMANDS = {
       ["--difficulty EASY|MEDIUM|HARD", "按难度筛选"],
       ["--tags a,b", "按标签筛选，逗号分隔"],
       ["--limit N", "返回条数，默认 20"],
+      ["--refresh", "强制重新抓取已解决状态缓存"],
+    ],
+  },
+  progress: {
+    usage: "lc progress [选项]",
+    desc: "展示已解决的题目：统计 + 表格（需登录）",
+    options: [
+      ["--difficulty EASY|MEDIUM|HARD", "仅统计/展示该难度"],
+      ["--limit N", "每页条数，默认 20"],
+      ["--offset N", "跳过前 N 条，默认 0"],
+      ["--refresh", "忽略缓存，强制重新抓取已解决列表"],
     ],
   },
   random: {
@@ -257,19 +268,18 @@ export function difficultyLabel(difficulty) {
   return { cn: String(difficulty ?? "未知"), color: "dim" };
 }
 
-export function renderList(questions, { style: st = style } = {}) {
-  if (!questions || questions.length === 0) return "无匹配题目";
-  const header = ["难度", "标题", "slug"];
-  const rows = questions.map((q) => {
-    const d = difficultyLabel(q.difficulty);
-    const title = q.titleCn ? `${q.title} / ${q.titleCn}` : (q.title ?? "");
-    const slug = q.titleSlug ?? "";
-    return [
-      { plain: d.cn, styled: st[d.color](d.cn) },
-      { plain: title, styled: title },
-      { plain: slug, styled: st.dim(slug) },
-    ];
-  });
+export function isChineseEnv(env = process.env) {
+  return /^zh/i.test(env.LC_ALL || env.LANG || "");
+}
+
+export function resolveTitle(q, zh) {
+  const a = zh ? q?.titleCn : q?.title;
+  const b = zh ? q?.title : q?.titleCn;
+  return a || b || q?.titleSlug || "";
+}
+
+export function renderTable(header, rows, { style: st = style } = {}) {
+  if (!rows || rows.length === 0) return "";
   const widths = header.map((h, i) =>
     Math.max(strWidth(h), ...rows.map((r) => strWidth(r[i].plain)))
   );
@@ -283,6 +293,139 @@ export function renderList(questions, { style: st = style } = {}) {
     ...rows.map(fmt),
     rule("└", "┴", "┘"),
   ].join("\n");
+}
+
+export function renderList(questions, { style: st = style, zh = isChineseEnv(), solved } = {}) {
+  if (!questions || questions.length === 0) return "无匹配题目";
+  const header = solved ? ["难度", "状态", "标题", "slug"] : ["难度", "标题", "slug"];
+  const rows = questions.map((q) => {
+    const d = difficultyLabel(q.difficulty);
+    const cells = [{ plain: d.cn, styled: st[d.color](d.cn) }];
+    if (solved) {
+      cells.push(solved.has(q.titleSlug)
+        ? { plain: "✓", styled: st.green("✓") }
+        : { plain: "", styled: "" });
+    }
+    cells.push(
+      { plain: resolveTitle(q, zh), styled: resolveTitle(q, zh) },
+      { plain: q.titleSlug ?? "", styled: st.dim(q.titleSlug ?? "") },
+    );
+    return cells;
+  });
+  return renderTable(header, rows, { style: st });
+}
+
+const SOLVED_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const SOLVED_CACHE_FILE = "solved.json";
+
+function readRawSolvedCache(cachePath) {
+  if (!existsSync(cachePath)) return null;
+  let cache;
+  try { cache = JSON.parse(readFileSync(cachePath, "utf8")); } catch { return null; }
+  if (!cache || !Array.isArray(cache.solved) || typeof cache.fetchedAt !== "number") return null;
+  return cache;
+}
+
+function writeSolvedCache(cachePath, solved, now) {
+  mkdirSync(dirname(cachePath), { recursive: true });
+  writeFileSync(cachePath, JSON.stringify({ fetchedAt: now(), solved }));
+}
+
+function normalizeSolvedQuestion(q) {
+  return {
+    slug: q.titleSlug,
+    frontendId: q.frontendId,
+    title: q.title,
+    titleCn: q.translatedTitle,
+    difficulty: q.difficulty,
+    lastSubmittedAt: q.lastSubmittedAt,
+    numSubmitted: q.numSubmitted,
+    lastResult: q.lastResult,
+  };
+}
+
+async function fetchSolvedPages({ cwd, session, timeoutMs, call }) {
+  const acc = [];
+  const LIMIT = 100;
+  for (let offset = 0; offset < 20000; ) {
+    const data = await call(
+      "get_problem_progress",
+      { offset, limit: LIMIT, questionStatus: "SOLVED" },
+      { session, cwd, timeoutMs },
+    );
+    const page = data?.questions;
+    if (!page) throw new Error("获取已解决列表失败：接口未返回预期数据");
+    const qs = page.questions ?? [];
+    acc.push(...qs);
+    offset += qs.length;
+    if (qs.length === 0 || offset >= (page.totalNum ?? offset)) break;
+  }
+  const map = new Map();
+  for (const q of acc) if (q?.titleSlug) map.set(q.titleSlug, q);
+  return [...map.values()]
+    .map(normalizeSolvedQuestion)
+    .sort((a, b) => (b.lastSubmittedAt || "").localeCompare(a.lastSubmittedAt || ""));
+}
+
+export async function loadSolved({ cwd, session = "", refresh = false, timeoutMs = 120000, callTool: call = callTool, now = () => Date.now() } = {}) {
+  if (!session) return null;
+  const cachePath = join(cwd, ".lc-cache", SOLVED_CACHE_FILE);
+  const raw = readRawSolvedCache(cachePath);
+  const fresh = raw && now() - raw.fetchedAt < SOLVED_CACHE_TTL_MS ? raw.solved : null;
+  if (!refresh && fresh) return { solved: fresh, stale: false };
+  try {
+    const solved = await fetchSolvedPages({ cwd, session, timeoutMs, call });
+    writeSolvedCache(cachePath, solved, now);
+    return { solved, stale: false };
+  } catch (e) {
+    if (raw) return { solved: raw.solved, stale: true };
+    throw e;
+  }
+}
+
+export function renderProgressSummary(solved, { style: st = style } = {}) {
+  const count = (d) => solved.filter((s) => s.difficulty === d).length;
+  return `已解决 ${solved.length} · 简单 ${count("EASY")} · 中等 ${count("MEDIUM")} · 困难 ${count("HARD")}`;
+}
+
+export function renderSolvedTable(solved, { style: st = style, zh = isChineseEnv(), difficulty, limit, offset = 0 } = {}) {
+  let rows = solved;
+  if (difficulty) rows = rows.filter((s) => s.difficulty === difficulty);
+  if (limit != null) rows = rows.slice(offset, offset + limit);
+  if (!rows || rows.length === 0) return "暂无已解决题目";
+  const header = ["难度", "标题", "slug", "最近提交", "次数"];
+  const table = rows.map((s) => {
+    const d = difficultyLabel(s.difficulty);
+    const date = String(s.lastSubmittedAt ?? "").slice(0, 10);
+    return [
+      { plain: d.cn, styled: st[d.color](d.cn) },
+      { plain: resolveTitle(s, zh), styled: resolveTitle(s, zh) },
+      { plain: s.slug ?? "", styled: st.dim(s.slug ?? "") },
+      { plain: date, styled: st.dim(date) },
+      { plain: String(s.numSubmitted ?? ""), styled: String(s.numSubmitted ?? "") },
+    ];
+  });
+  return renderTable(header, table, { style: st });
+}
+
+export async function cmdProgress(opts, deps) {
+  const {
+    callTool: call = callTool, cwd, session = "", out = console.log,
+    warn = (s) => console.error(s), style: st = style, now,
+  } = deps;
+  requireSession(session);
+  const limit = Number(opts.flags.limit ?? 20);
+  if (!Number.isInteger(limit) || limit <= 0) throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
+  const offset = Number(opts.flags.offset ?? 0);
+  if (!Number.isInteger(offset) || offset < 0) throw new Error(`--offset 需为非负整数，收到：${opts.flags.offset}`);
+  const difficulty = normalizeDifficulty(opts.flags.difficulty);
+  const timeoutMs = Number(opts.flags.timeout) > 0 ? Number(opts.flags.timeout) : 120000;
+  const { solved, stale } = await loadSolved({
+    cwd, session, refresh: opts.flags.refresh === true, timeoutMs, callTool: call, now,
+  });
+  if (stale) warn("注意：已解决列表刷新失败，已使用过期缓存");
+  out(renderProgressSummary(solved, { style: st }));
+  out(renderSolvedTable(solved, { style: st, zh: deps.zh ?? isChineseEnv(), difficulty, limit, offset }));
 }
 
 export function htmlToText(html) {
@@ -451,7 +594,10 @@ export async function cmdInit(opts, deps) {
 }
 
 export async function cmdList(opts, deps) {
-  const { callTool: call = callTool, cwd, session = "", out = console.log } = deps;
+  const {
+    callTool: call = callTool, cwd, session = "", out = console.log,
+    warn = (s) => console.error(s), style: st = style, now,
+  } = deps;
   const limit = Number(opts.flags.limit ?? 20);
   if (!Number.isInteger(limit) || limit <= 0) {
     throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
@@ -465,7 +611,23 @@ export async function cmdList(opts, deps) {
   }
   const data = await call("search_problems", args, { session, cwd });
   if (data && data.raw !== undefined) { out(String(data.raw)); return; }
-  out(renderList(data?.problems?.questions ?? [], { style: deps.style ?? style }));
+  const questions = data?.problems?.questions ?? [];
+
+  let solved;
+  if (session) {
+    try {
+      const r = await loadSolved({
+        cwd, session, refresh: opts.flags.refresh === true,
+        timeoutMs: Number(opts.flags.timeout) > 0 ? Number(opts.flags.timeout) : 120000,
+        callTool: call, now,
+      });
+      if (r.stale) warn("注意：已解决列表刷新失败，已使用过期缓存");
+      solved = new Set(r.solved.map((s) => s.slug));
+    } catch (e) {
+      warn(`提示：已解决列表获取失败（${e.message}），本次不显示状态列`);
+    }
+  }
+  out(renderList(questions, { style: st, zh: deps.zh ?? isChineseEnv(), solved }));
 }
 
 const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"];
@@ -792,6 +954,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
       case "config":  cmdConfig(opts, d); break;
       case "list":    await cmdList(opts, { ...d, session }); break;
       case "random":  await cmdRandom(opts, { ...d, session }); break;
+      case "progress": await cmdProgress(opts, { ...d, session }); break;
       case "show":    await cmdShow(opts, { ...d, session }); break;
       case "run":     await cmdRun(opts, { ...d, session }); break;
       case "submit":  await cmdSubmit(opts, { ...d, session }); break;

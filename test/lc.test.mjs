@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -18,6 +18,8 @@ import {
   unsetEnvVar,
   mask,
   renderList,
+  isChineseEnv,
+  resolveTitle,
   htmlToText,
   normalizeDifficulty,
   formatRandom,
@@ -30,6 +32,10 @@ import {
   cmdConfig,
   cmdInit,
   cmdList,
+  loadSolved,
+  renderProgressSummary,
+  renderSolvedTable,
+  cmdProgress,
   cmdShow,
   fetchTranslated,
   cmdRun,
@@ -43,12 +49,37 @@ const fakeRoot = () => {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "light-leetcode-cli" }));
   return dir;
 };
+const PQ = (slug, date, extra = {}) => ({
+  titleSlug: slug,
+  frontendId: "1",
+  title: String(slug).toUpperCase(),
+  translatedTitle: slug,
+  difficulty: "EASY",
+  lastSubmittedAt: date,
+  numSubmitted: 1,
+  lastResult: "AC",
+  ...extra,
+});
+const NORM = (slug, date, extra = {}) => {
+  const q = PQ(slug, date);
+  return {
+    slug: q.titleSlug,
+    frontendId: q.frontendId,
+    title: q.title,
+    titleCn: q.translatedTitle,
+    difficulty: q.difficulty,
+    lastSubmittedAt: q.lastSubmittedAt,
+    numSubmitted: q.numSubmitted,
+    lastResult: q.lastResult,
+    ...extra,
+  };
+};
 
 test("printHelp 打印命令列表", () => {
   const lines = [];
   printHelp((s) => lines.push(s));
   const text = lines.join("\n");
-  for (const cmd of ["init", "config", "list", "random", "show", "run", "submit"]) {
+  for (const cmd of ["init", "config", "list", "random", "progress", "show", "run", "submit"]) {
     assert.match(text, new RegExp(cmd));
   }
   assert.match(text, /lc <命令> --help/);
@@ -183,7 +214,7 @@ test("renderList 渲染带边框表格、中文难度并处理空列表", () => 
   const out = renderList([
     { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" },
     { difficulty: "HARD", title: "Hard One", titleSlug: "hard-one" },
-  ]);
+  ], { zh: false });
   const lines = out.split("\n");
   assert.match(lines[0], /^┌/);
   assert.match(lines[lines.length - 1], /┘$/);
@@ -191,9 +222,50 @@ test("renderList 渲染带边框表格、中文难度并处理空列表", () => 
   assert.match(lines[1], /slug/);
   assert.match(out, /简单/);
   assert.match(out, /困难/);
-  assert.match(out, /Two Sum \/ 两数之和/);
+  assert.match(out, /Two Sum/);
   assert.doesNotMatch(out, /EASY|HARD/);
   assert.equal(renderList([]), "无匹配题目");
+});
+
+test("isChineseEnv 识别中文环境", () => {
+  assert.equal(isChineseEnv({ LANG: "zh_CN.UTF-8" }), true);
+  assert.equal(isChineseEnv({ LANG: "zh" }), true);
+  assert.equal(isChineseEnv({ LANG: "en_US.UTF-8" }), false);
+  assert.equal(isChineseEnv({ LC_ALL: "zh_CN" }), true);
+  assert.equal(isChineseEnv({ LANG: "zh_CN.UTF-8", LC_ALL: "en_US.UTF-8" }), false);
+  assert.equal(isChineseEnv({}), false);
+});
+
+test("resolveTitle 按语言取标题并回退", () => {
+  const q = { title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" };
+  assert.equal(resolveTitle(q, true), "两数之和");
+  assert.equal(resolveTitle(q, false), "Two Sum");
+  assert.equal(resolveTitle({ title: "Two Sum", titleSlug: "two-sum" }, true), "Two Sum");
+  assert.equal(resolveTitle({ titleCn: "两数之和", titleSlug: "two-sum" }, false), "两数之和");
+  assert.equal(resolveTitle({ titleSlug: "two-sum" }, true), "two-sum");
+});
+
+test("renderList 标题按语言显示单列并回退", () => {
+  const row = { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" };
+  const en = renderList([row], { zh: false });
+  assert.match(en, /Two Sum/);
+  assert.doesNotMatch(en, /两数之和/);
+  const zh = renderList([row], { zh: true });
+  assert.match(zh, /两数之和/);
+  assert.doesNotMatch(zh, /Two Sum/);
+  const fb = renderList([{ difficulty: "EASY", title: "Two Sum", titleSlug: "two-sum" }], { zh: true });
+  assert.match(fb, /Two Sum/);
+});
+
+test("renderList 提供 solved 集合时显示状态列，否则不显示", () => {
+  const row = { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" };
+  const withSolved = renderList([row], { zh: false, solved: new Set(["two-sum"]) });
+  assert.match(withSolved, /状态/);
+  assert.match(withSolved, /✓/);
+  const unsolved = renderList([row], { zh: false, solved: new Set(["other"]) });
+  assert.doesNotMatch(unsolved, /✓/);
+  const without = renderList([row], { zh: false });
+  assert.doesNotMatch(without, /状态/);
 });
 
 test("normalizeDifficulty 归一化并校验", () => {
@@ -490,6 +562,157 @@ test("cmdInit：本地依赖缺失时调用 npm install", async () => {
   assert.deepEqual(calls[0][1], ["install"]);
 });
 
+test("loadSolved 分页抓取、按 slug 去重并按最近提交倒序写入缓存", async () => {
+  const dir = fakeRoot();
+  let calls = 0;
+  const r = await loadSolved({
+    cwd: dir, session: "s",
+    callTool: async (name, args) => {
+      calls++;
+      const page = args.offset === 0
+        ? [PQ("c", "2026-01-01"), PQ("a", "2026-01-03")]
+        : [PQ("a", "2026-01-03"), PQ("b", "2026-01-02")];
+      return { questions: { totalNum: 3, questions: page } };
+    },
+  });
+  assert.equal(calls, 2);
+  assert.equal(r.stale, false);
+  assert.deepEqual(r.solved.map((s) => s.slug), ["a", "b", "c"]);
+  assert.deepEqual(r.solved[0], {
+    slug: "a", frontendId: "1", title: "A", titleCn: "a",
+    difficulty: "EASY", lastSubmittedAt: "2026-01-03", numSubmitted: 1, lastResult: "AC",
+  });
+  assert.equal(existsSync(join(dir, ".lc-cache", "solved.json")), true);
+});
+
+test("loadSolved 24h 内缓存命中不重新抓取，过期后重抓", async () => {
+  const dir = fakeRoot();
+  let calls = 0;
+  const callTool = async () => { calls++; return { questions: { totalNum: 1, questions: [PQ("a", "2026-01-01")] } }; };
+  const times = [1_000_000, 1_000_000, 100_000_000_000];
+  let i = 0;
+  const now = () => times[Math.min(i++, times.length - 1)];
+  const first = await loadSolved({ cwd: dir, session: "s", callTool, now });
+  assert.equal(calls, 1);
+  assert.equal(first.solved.length, 1);
+  const hit = await loadSolved({ cwd: dir, session: "s", callTool, now });
+  assert.equal(calls, 1, "命中缓存不应再抓取");
+  assert.equal(hit.solved.length, 1);
+  const expired = await loadSolved({ cwd: dir, session: "s", callTool, now });
+  assert.equal(calls, 2, "过期应重新抓取");
+  assert.equal(expired.solved.length, 1);
+});
+
+test("loadSolved --refresh 强制重抓，缓存损坏时也重抓并修复", async () => {
+  const dir = fakeRoot();
+  let calls = 0;
+  const callTool = async () => { calls++; return { questions: { totalNum: 1, questions: [PQ("a", "2026-01-01")] } }; };
+  await loadSolved({ cwd: dir, session: "s", callTool });
+  await loadSolved({ cwd: dir, session: "s", callTool, refresh: true });
+  assert.equal(calls, 2, "refresh 应重新抓取");
+  const cachePath = join(dir, ".lc-cache", "solved.json");
+  writeFileSync(cachePath, "not-json");
+  await loadSolved({ cwd: dir, session: "s", callTool });
+  assert.equal(calls, 3, "缓存损坏应重抓");
+  assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).solved.length, 1);
+});
+
+test("loadSolved 抓取失败时用过期缓存并标记 stale，无缓存则报错", async () => {
+  const dir = fakeRoot();
+  const cachePath = join(dir, ".lc-cache", "solved.json");
+  mkdirSync(join(dir, ".lc-cache"), { recursive: true });
+  writeFileSync(cachePath, JSON.stringify({ fetchedAt: 0, solved: [NORM("a", "2026-01-01")] }));
+  const failing = async () => { throw new Error("boom"); };
+  const stale = await loadSolved({ cwd: dir, session: "s", callTool: failing });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.solved[0].slug, "a");
+  const dir2 = fakeRoot();
+  await assert.rejects(loadSolved({ cwd: dir2, session: "s", callTool: failing }), /boom/);
+});
+
+test("loadSolved 无 session 时返回 null 且不请求", async () => {
+  let called = false;
+  const r = await loadSolved({ cwd: fakeRoot(), session: "", callTool: async () => { called = true; } });
+  assert.equal(r, null);
+  assert.equal(called, false);
+});
+
+test("renderProgressSummary 统计已解决数量与难度分布", () => {
+  const solved = [
+    PQ("a", "2026-01-01"),
+    PQ("b", "2026-01-02", { difficulty: "MEDIUM" }),
+    PQ("c", "2026-01-03", { difficulty: "HARD" }),
+  ];
+  assert.equal(renderProgressSummary(solved), "已解决 3 · 简单 1 · 中等 1 · 困难 1");
+});
+
+test("renderSolvedTable 渲染难度/标题/slug/日期/次数并支持过滤与分页", () => {
+  const solved = [
+    NORM("a", "2026-01-01"),
+    NORM("b", "2026-01-02", { difficulty: "MEDIUM", numSubmitted: 5 }),
+    NORM("c", "2026-01-03", { difficulty: "HARD", lastSubmittedAt: "2026-02-10T08:00:00" }),
+  ];
+  const all = renderSolvedTable(solved, { zh: true });
+  assert.match(all, /难度/);
+  assert.match(all, /slug/);
+  assert.match(all, /最近提交/);
+  assert.match(all, /次数/);
+  assert.match(all, /2026-02-10/);
+  assert.doesNotMatch(all, /T08:00:00/);
+  const filtered = renderSolvedTable(solved, { zh: true, difficulty: "MEDIUM" });
+  assert.match(filtered, /b/);
+  assert.doesNotMatch(filtered, /c/);
+  const page = renderSolvedTable(solved, { zh: true, limit: 1, offset: 1 });
+  assert.match(page, /b/);
+  assert.doesNotMatch(page, /a/);
+  assert.doesNotMatch(page, /c/);
+});
+
+test("cmdProgress 需要登录，成功后输出统计与表格", async () => {
+  const dir = fakeRoot();
+  await assert.rejects(
+    cmdProgress({ positionals: [], flags: {} }, {
+      cwd: dir, session: "", out: () => {}, warn: () => {},
+      callTool: async () => { throw new Error("不应调用"); },
+    }),
+    /需要登录/
+  );
+  const dir2 = fakeRoot();
+  const out2 = [];
+  await cmdProgress({ positionals: [], flags: {} }, {
+    cwd: dir2, session: "s", out: (s) => out2.push(s),
+    callTool: async (name) => ({ questions: { totalNum: 2, questions: [PQ("a", "2026-01-01"), PQ("b", "2026-01-02", { difficulty: "HARD" })] } }),
+  });
+  assert.match(out2[0], /已解决 2 · 简单 1 · 中等 0 · 困难 1/);
+  assert.match(out2.join("\n"), /最近提交/);
+});
+
+test("cmdProgress 支持 --difficulty/--limit/--offset，stale 时告警", async () => {
+  const dir = fakeRoot();
+  const out = [];
+  const warnings = [];
+  mkdirSync(join(dir, ".lc-cache"), { recursive: true });
+  writeFileSync(join(dir, ".lc-cache", "solved.json"),
+    JSON.stringify({ fetchedAt: 0, solved: [NORM("a", "2026-01-01"), NORM("b", "2026-01-02", { difficulty: "HARD" })] }));
+  await cmdProgress({ positionals: [], flags: { difficulty: "hard" } }, {
+    cwd: dir, session: "s", out: (s) => out.push(s), warn: (s) => warnings.push(s),
+    callTool: async () => { throw new Error("net down"); },
+  });
+  assert.equal(warnings.length, 1, "stale 应告警");
+  assert.match(warnings[0], /已使用过期缓存/);
+  assert.match(out[0], /已解决 2 · 简单 1 · 中等 0 · 困难 1/);
+  assert.match(out.join("\n"), /b/);
+  assert.doesNotMatch(out.join("\n"), /`a`|(^|│ )a( │|$)/);
+  const out2 = [];
+  const dir3 = fakeRoot();
+  await cmdProgress({ positionals: [], flags: { limit: "1", offset: "1" } }, {
+    cwd: dir3, session: "s", out: (s) => out2.push(s),
+    callTool: async () => ({ questions: { totalNum: 2, questions: [PQ("a", "2026-01-01"), PQ("b", "2026-01-02")] } }),
+  });
+  assert.match(out2.join("\n"), /a/);
+  assert.doesNotMatch(out2.join("\n"), /b/);
+});
+
 test("cmdList 传参并渲染结果", async () => {
   const captured = [];
   const out = [];
@@ -499,6 +722,7 @@ test("cmdList 传参并渲染结果", async () => {
       cwd: "/tmp",
       session: "s",
       out: (s) => out.push(s),
+      warn: () => {},
       callTool: async (name, args, opts) => {
         captured.push({ name, args, session: opts.session });
         return { problems: { questions: [{ difficulty: "Easy", title: "Two Sum", titleSlug: "two-sum" }] } };
