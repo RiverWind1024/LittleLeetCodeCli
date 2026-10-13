@@ -3,6 +3,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, chmodSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { htmlToText, strWidth, parseEnvContent,loadEnv,setEnvVar,unsetEnvVar } from "./utils.js";
+import { renderProgressSummary, renderSolvedTable,renderList,difficultyLabel } from "./render.js";
 
 const COMMANDS = {
   init: {
@@ -175,79 +177,13 @@ export function findExisting(cwd, slug, lang) {
   return { path: matches[0] ?? null, matches };
 }
 
-export function parseEnvContent(content) {
-  const map = {};
-  for (const raw of String(content).split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-    const k = line.slice(0, eq).trim();
-    let v = line.slice(eq + 1).trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-      v = v.slice(1, -1);
-    }
-    map[k] = v;
-  }
-  return map;
-}
-
-export function loadEnv(cwd, env = process.env) {
-  const merged = { ...env };
-  const p = join(cwd, ".env");
-  if (existsSync(p)) {
-    const parsed = parseEnvContent(readFileSync(p, "utf8"));
-    for (const [k, v] of Object.entries(parsed)) {
-      if (merged[k] === undefined) merged[k] = v;
-    }
-  }
-  return { session: merged.LEETCODE_SESSION ?? "" };
-}
-
-export function setEnvVar(content, key, value) {
-  const lines = String(content).split("\n");
-  let found = false;
-  const out = lines.map((line) => {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) return line;
-    const eq = t.indexOf("=");
-    if (eq === -1) return line;
-    if (t.slice(0, eq).trim() === key) {
-      found = true;
-      return `${key}=${value}`;
-    }
-    return line;
-  });
-  if (!found) {
-    if (out.length && out[out.length - 1].trim() !== "") out.push("");
-    out.push(`${key}=${value}`);
-  }
-  return out.join("\n").replace(/\n*$/, "\n");
-}
-
-export function unsetEnvVar(content, key) {
-  const out = String(content).split("\n").filter((line) => {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) return true;
-    const eq = t.indexOf("=");
-    if (eq === -1) return true;
-    return t.slice(0, eq).trim() !== key;
-  });
-  return out.join("\n").replace(/\n*$/, "\n");
-}
 
 export function mask(v) {
   const s = String(v);
   return s.length <= 8 ? "*".repeat(s.length) : `${s.slice(0, 4)}****${s.slice(-4)}`;
 }
 
-function strWidth(s) {
-  let w = 0;
-  for (const ch of String(s)) {
-    w += /[\u2e80-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch) ? 2 : 1;
-  }
-  return w;
-}
+
 
 export function detectColor(stream = process.stdout, env = process.env) {
   if (env.NO_COLOR !== undefined) return false;
@@ -270,63 +206,8 @@ export function createStyle(enabled) {
 
 export const style = createStyle(detectColor());
 
-const DIFFICULTY = {
-  EASY: { cn: "简单", color: "green" },
-  MEDIUM: { cn: "中等", color: "yellow" },
-  HARD: { cn: "困难", color: "red" },
-};
-
-export function difficultyLabel(difficulty) {
-  const key = String(difficulty ?? "").toUpperCase();
-  if (DIFFICULTY[key]) return DIFFICULTY[key];
-  return { cn: String(difficulty ?? "未知"), color: "dim" };
-}
-
 export function isChineseEnv(env = process.env) {
   return /^zh/i.test(env.LC_ALL || env.LANG || "");
-}
-
-export function resolveTitle(q, zh) {
-  const a = zh ? q?.titleCn : q?.title;
-  const b = zh ? q?.title : q?.titleCn;
-  return a || b || q?.titleSlug || "";
-}
-
-export function renderTable(header, rows, { style: st = style } = {}) {
-  if (!rows || rows.length === 0) return "";
-  const widths = header.map((h, i) =>
-    Math.max(strWidth(h), ...rows.map((r) => strWidth(r[i].plain)))
-  );
-  const rule = (l, mid, r) => l + widths.map((w) => "─".repeat(w + 2)).join(mid) + r;
-  const fmt = (cells) =>
-    "│ " + cells.map((c, i) => c.styled + " ".repeat(Math.max(0, widths[i] - strWidth(c.plain)))).join(" │ ") + " │";
-  return [
-    rule("┌", "┬", "┐"),
-    fmt(header.map((h) => ({ plain: h, styled: st.bold(h) }))),
-    rule("├", "┼", "┤"),
-    ...rows.map(fmt),
-    rule("└", "┴", "┘"),
-  ].join("\n");
-}
-
-export function renderList(questions, { style: st = style, zh = isChineseEnv(), solved } = {}) {
-  if (!questions || questions.length === 0) return "无匹配题目";
-  const header = solved ? ["难度", "状态", "标题", "slug"] : ["难度", "标题", "slug"];
-  const rows = questions.map((q) => {
-    const d = difficultyLabel(q.difficulty);
-    const cells = [{ plain: d.cn, styled: st[d.color](d.cn) }];
-    if (solved) {
-      cells.push(solved.has(q.titleSlug)
-        ? { plain: "✓", styled: st.green("✓") }
-        : { plain: "", styled: "" });
-    }
-    cells.push(
-      { plain: resolveTitle(q, zh), styled: resolveTitle(q, zh) },
-      { plain: q.titleSlug ?? "", styled: st.dim(q.titleSlug ?? "") },
-    );
-    return cells;
-  });
-  return renderTable(header, rows, { style: st });
 }
 
 const SOLVED_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -397,30 +278,7 @@ export async function loadSolved({ cwd, session = "", refresh = false, timeoutMs
   }
 }
 
-export function renderProgressSummary(solved, { style: st = style } = {}) {
-  const count = (d) => solved.filter((s) => s.difficulty === d).length;
-  return `已解决 ${solved.length} · 简单 ${count("EASY")} · 中等 ${count("MEDIUM")} · 困难 ${count("HARD")}`;
-}
 
-export function renderSolvedTable(solved, { style: st = style, zh = isChineseEnv(), difficulty, limit, offset = 0 } = {}) {
-  let rows = solved;
-  if (difficulty) rows = rows.filter((s) => s.difficulty === difficulty);
-  if (limit != null) rows = rows.slice(offset, offset + limit);
-  if (!rows || rows.length === 0) return "暂无已解决题目";
-  const header = ["难度", "标题", "slug", "最近提交", "次数"];
-  const table = rows.map((s) => {
-    const d = difficultyLabel(s.difficulty);
-    const date = String(s.lastSubmittedAt ?? "").slice(0, 10);
-    return [
-      { plain: d.cn, styled: st[d.color](d.cn) },
-      { plain: resolveTitle(s, zh), styled: resolveTitle(s, zh) },
-      { plain: s.slug ?? "", styled: st.dim(s.slug ?? "") },
-      { plain: date, styled: st.dim(date) },
-      { plain: String(s.numSubmitted ?? ""), styled: String(s.numSubmitted ?? "") },
-    ];
-  });
-  return renderTable(header, table, { style: st });
-}
 
 export async function cmdProgress(opts, deps) {
   const {
@@ -442,28 +300,7 @@ export async function cmdProgress(opts, deps) {
   out(renderSolvedTable(solved, { style: st, zh: deps.zh ?? isChineseEnv(), difficulty, limit, offset }));
 }
 
-export function htmlToText(html) {
-  return String(html)
-    .replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi,
-      (_, inner) => "\n" + inner.replace(/<[^>]+>/g, "").split("\n").map((l) => (l.trim() ? "  " + l.trim() : "")).join("\n") + "\n")
-    .replace(/<sup[^>]*>([\s\S]*?)<\/sup>/gi, "^$1")
-    .replace(/<sub[^>]*>([\s\S]*?)<\/sub>/gi, "_$1")
-    .replace(/<li[^>]*>/gi, "  - ")
-    .replace(/<\/(p|div|pre|li|ul|ol|h[1-6]|blockquote|tr)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .split("\n")
-    .map((l) => l.replace(/[ \t]+$/g, "").replace(/^[ \t]+$/, ""))
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
+
 
 export function resolveMcpBin(cwd) {
   const local = join(cwd, "node_modules", ".bin", "leetcode-mcp-server");
@@ -537,10 +374,7 @@ export function callTool(name, toolArgs, opts = {}) {
 
 const SESSION_KEY = "LEETCODE_SESSION";
 
-function writeEnv(envPath, content) {
-  writeFileSync(envPath, content, { mode: 0o600 });
-  chmodSync(envPath, 0o600);
-}
+
 
 const CONFIG_USAGE = "用法：lc config <get|set|unset|list> [session|lang] [value]";
 
