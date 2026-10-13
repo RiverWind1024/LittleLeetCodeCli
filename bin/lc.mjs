@@ -11,8 +11,8 @@ const COMMANDS = {
     options: [],
   },
   config: {
-    usage: "lc config <get|set|unset|list> [key] [value]",
-    desc: "管理项目根 .env 配置（目前仅 session）",
+    usage: "lc config <get|set|unset|list> [session|lang] [value]",
+    desc: "管理项目根 .env 配置：session（登录 Cookie）、lang（默认编程语言）",
     options: [],
   },
   list: {
@@ -47,7 +47,7 @@ const COMMANDS = {
     usage: "lc show <slug> [选项]",
     desc: "下载题目、生成代码文件、打印中文题面",
     options: [
-      ["--lang L", "目标语言，默认 python3"],
+      ["--lang L", "目标语言，默认取 lc config lang，未设置则 python3"],
       ["--force", "覆盖已存在的代码文件"],
     ],
   },
@@ -55,7 +55,7 @@ const COMMANDS = {
     usage: "lc run <slug> [选项]",
     desc: "用题目默认样例（或 --input）运行本地代码",
     options: [
-      ["--lang L", "目标语言，默认 python3"],
+      ["--lang L", "目标语言，默认取 lc config lang，未设置则 python3"],
       ["--input \"...\"", "自定义测试输入；省略则用题目默认样例"],
       ["--timeout ms", "超时，默认 120000"],
     ],
@@ -64,7 +64,7 @@ const COMMANDS = {
     usage: "lc submit <slug> [选项]",
     desc: "提交本地代码",
     options: [
-      ["--lang L", "目标语言，默认 python3"],
+      ["--lang L", "目标语言，默认取 lc config lang，未设置则 python3"],
       ["--timeout ms", "超时，默认 120000"],
     ],
   },
@@ -81,7 +81,7 @@ export function printHelp(out = console.log) {
   }
   out("");
   out("命令帮助：lc <命令> --help 或 lc help <命令>");
-  out(`默认 --lang python3（支持：${Object.keys(LANG_MAP).join(", ")}）。site 固定为 cn。`);
+  out(`默认语言：lc config lang（未设置则 python3）；--lang 可临时覆盖。支持：${Object.keys(LANG_MAP).join(", ")}。site 固定为 cn。`);
 }
 
 // 返回 false 表示命令不存在（调用方可据此设置退出码）
@@ -141,6 +141,20 @@ export const LANG_MAP = {
   rust:       { langSlug: "rust",       fileName: "solution.rs",   comment: "//" },
   c:          { langSlug: "c",          fileName: "solution.c",    comment: "//" },
 };
+
+export const DEFAULT_LANG_KEY = "DEFAULT_LANG";
+export const FALLBACK_LANG = "python3";
+
+export function readDefaultLang(cwd) {
+  const p = join(cwd, ".env");
+  if (!existsSync(p)) return null;
+  const v = parseEnvContent(readFileSync(p, "utf8"))[DEFAULT_LANG_KEY];
+  return v && LANG_MAP[v] ? v : null;
+}
+
+export function chooseLang(flags = {}, cwd) {
+  return flags.lang ?? readDefaultLang(cwd) ?? FALLBACK_LANG;
+}
 
 export function resolveNewPath(cwd, slug, questionId, lang) {
   const id = String(questionId).padStart(4, "0");
@@ -432,6 +446,8 @@ export function htmlToText(html) {
   return String(html)
     .replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi,
       (_, inner) => "\n" + inner.replace(/<[^>]+>/g, "").split("\n").map((l) => (l.trim() ? "  " + l.trim() : "")).join("\n") + "\n")
+    .replace(/<sup[^>]*>([\s\S]*?)<\/sup>/gi, "^$1")
+    .replace(/<sub[^>]*>([\s\S]*?)<\/sub>/gi, "_$1")
     .replace(/<li[^>]*>/gi, "  - ")
     .replace(/<\/(p|div|pre|li|ul|ol|h[1-6]|blockquote|tr)>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -526,6 +542,19 @@ function writeEnv(envPath, content) {
   chmodSync(envPath, 0o600);
 }
 
+const CONFIG_USAGE = "用法：lc config <get|set|unset|list> [session|lang] [value]";
+
+const CONFIG_KEYS = {
+  session: { envKey: SESSION_KEY, secret: true },
+  lang: { envKey: DEFAULT_LANG_KEY, secret: false, validate: (v) => LANG_MAP[v] },
+};
+
+function resolveConfigKey(key) {
+  const spec = CONFIG_KEYS[key];
+  if (!spec) throw new Error(`${CONFIG_USAGE}\n（lang 支持：${Object.keys(LANG_MAP).join(", ")}）`);
+  return spec;
+}
+
 export function cmdConfig(opts, deps) {
   const { cwd, out = console.log } = deps;
   const [action, key, value] = opts.positionals;
@@ -533,26 +562,31 @@ export function cmdConfig(opts, deps) {
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
 
   if (action === "set") {
-    if (key !== "session" || !value) throw new Error("用法：lc config set session <cookie>");
-    writeEnv(envPath, setEnvVar(current, SESSION_KEY, value));
-    out(`已写入 .env：${SESSION_KEY}=${mask(value)}`);
+    const spec = resolveConfigKey(key);
+    if (!value) throw new Error(CONFIG_USAGE);
+    if (spec.validate && !spec.validate(value)) {
+      throw new Error(`不支持的语言：${value}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
+    }
+    writeEnv(envPath, setEnvVar(current, spec.envKey, value));
+    out(`已写入 .env：${spec.envKey}=${spec.secret ? mask(value) : value}`);
   } else if (action === "get") {
-    if (key !== "session") throw new Error("用法：lc config get session");
-    const v = parseEnvContent(current)[SESSION_KEY] ?? "";
-    out(v ? mask(v) : "未设置");
+    const spec = resolveConfigKey(key);
+    const v = parseEnvContent(current)[spec.envKey] ?? "";
+    out(v ? (spec.secret ? mask(v) : v) : "未设置");
   } else if (action === "unset") {
-    if (key !== "session") throw new Error("用法：lc config unset session");
-    const has = Object.prototype.hasOwnProperty.call(parseEnvContent(current), SESSION_KEY);
+    const spec = resolveConfigKey(key);
+    const has = Object.prototype.hasOwnProperty.call(parseEnvContent(current), spec.envKey);
     if (!has) { out("未设置"); return; }
-    writeEnv(envPath, unsetEnvVar(current, SESSION_KEY));
-    out(`已移除 ${SESSION_KEY}`);
+    writeEnv(envPath, unsetEnvVar(current, spec.envKey));
+    out(`已移除 ${spec.envKey}`);
   } else if (action === "list") {
     const map = parseEnvContent(current);
     const keys = Object.keys(map);
     if (!keys.length) { out("（.env 为空）"); return; }
-    for (const k of keys) out(`${k}=${mask(map[k])}`);
+    const secrets = new Set(Object.values(CONFIG_KEYS).filter((s) => s.secret).map((s) => s.envKey));
+    for (const k of keys) out(`${k}=${secrets.has(k) ? mask(map[k]) : map[k]}`);
   } else {
-    throw new Error("用法：lc config <get|set|unset|list> [key] [value]");
+    throw new Error(CONFIG_USAGE);
   }
 }
 
@@ -705,6 +739,17 @@ export async function fetchTranslated(slug, { fetchImpl = fetch, timeoutMs = 800
   }
 }
 
+export function renderProblemHeader(title, text, comment) {
+  const c = comment.endsWith(" ") ? comment : comment + " ";
+  const lines = [];
+  if (title) lines.push(c + title);
+  if (text) {
+    if (lines.length) lines.push(comment);
+    for (const l of String(text).split("\n")) lines.push(l ? c + l : comment);
+  }
+  return lines.length ? lines.join("\n") + "\n\n" : "";
+}
+
 export async function cmdShow(opts, deps) {
   const {
     callTool: call = callTool, cwd, session = "", out = console.log, style: st = style,
@@ -712,7 +757,7 @@ export async function cmdShow(opts, deps) {
   } = deps;
   const slug = opts.positionals[0];
   if (!slug) throw new Error("用法：lc show <slug> [--lang L] [--force]");
-  const lang = opts.flags.lang ?? "python3";
+  const lang = chooseLang(opts.flags, cwd);
   const meta = LANG_MAP[lang];
   if (!meta) throw new Error(`不支持的语言：${lang}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
 
@@ -724,24 +769,27 @@ export async function cmdShow(opts, deps) {
   }
   const path = resolveNewPath(cwd, slug, problem.questionId, lang);
 
+  const zh = await fetchZh(slug);
+  const zhTitle = zh?.title || problem.title || null;
+  const title = zhTitle || slug;
+  const body = htmlToText(zh?.content || problem.content || "");
+
   if (existsSync(path) && !opts.flags.force) {
     out(`${st.dim("已存在，跳过：")}${path}${st.dim("（--force 覆盖）")}`);
   } else {
     const snippet = (problem.codeSnippets ?? []).find((s) => s.langSlug === meta.langSlug);
-    const code = snippet ? `${snippet.code}\n` : `${meta.comment} TODO: implement\n`;
+    const header = renderProblemHeader(zhTitle, body, meta.comment);
+    const code = header + (snippet ? `${snippet.code}\n` : `${meta.comment} TODO: implement\n`);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, code);
     out(`${st.green("✓ 已生成：")}${path}`);
   }
-  const zh = await fetchZh(slug);
-  const title = zh?.title || problem.title || slug;
-  const content = zh?.content || problem.content || "";
   const diff = difficultyLabel(problem.difficulty);
   out("");
   out(`${st.bold(title)}  ${st[diff.color](`[${diff.cn}]`)}`);
   out(st.dim(`https://leetcode.cn/problems/${slug}/`));
   out("");
-  out(htmlToText(content));
+  out(body);
 }
 
 function emit(out, data, st, setExitCode = (n) => { process.exitCode = n; }) {
@@ -871,7 +919,7 @@ export async function cmdRun(opts, deps) {
   const slug = opts.positionals[0];
   if (!slug) throw new Error("用法：lc run <slug> [--lang L] [--input \"...\"] [--timeout ms]");
   requireSession(session);
-  const lang = opts.flags.lang ?? "python3";
+  const lang = chooseLang(opts.flags, cwd);
   const { path, meta } = pickCodeFile(cwd, slug, lang, out);
   const timeoutMs = parseTimeout(opts.flags.timeout);
   const args = {
@@ -890,7 +938,7 @@ export async function cmdSubmit(opts, deps) {
   const slug = opts.positionals[0];
   if (!slug) throw new Error("用法：lc submit <slug> [--lang L] [--timeout ms]");
   requireSession(session);
-  const lang = opts.flags.lang ?? "python3";
+  const lang = chooseLang(opts.flags, cwd);
   const { path, meta } = pickCodeFile(cwd, slug, lang, out);
   const timeoutMs = parseTimeout(opts.flags.timeout);
   const data = await call("submit_solution", {

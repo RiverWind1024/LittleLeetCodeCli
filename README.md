@@ -78,13 +78,15 @@ lc init                    # 交互式，粘贴即可（推荐）
 lc config set session <值>  # 或手动写入
 lc config get session      # 查看（脱敏：abcd****wxyz）
 lc config unset session    # 移除
-lc config list             # 列出所有键（值脱敏）
+lc config list             # 列出所有键（session 脱敏，其余明文）
+lc config set lang cpp     # 设置默认编程语言（不再每次传 --lang）
 ```
 
 Cookie 存在项目根的 `.env`（已在 `.gitignore` 中）：
 
 ```
 LEETCODE_SESSION=<你的cookie>
+DEFAULT_LANG=cpp
 ```
 
 **环境变量优先于 `.env`**，临时用一次可以：
@@ -102,7 +104,7 @@ LEETCODE_SESSION=<值> lc submit two-sum
 | 命令 | 说明 |
 |---|---|
 | `init` | 安装 MCP 依赖；未配置 Cookie 时交互引导写入 |
-| `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（目前仅 `session`） |
+| `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（`session` 登录 Cookie、`lang` 默认语言） |
 | `list [关键词]` | 搜索题目，输出带边框表格；登录后含已解决状态列 |
 | `random` | 随机抽取一题（只打印，不生成文件） |
 | `progress` | 已解决题目的统计与列表（需登录）；已解决列表缓存在 `.lc-cache/` |
@@ -116,7 +118,7 @@ LEETCODE_SESSION=<值> lc submit two-sum
 
 | 选项 | 默认 | 适用命令 | 说明 |
 |---|---|---|---|
-| `--lang <L>` | `python3` | `show` `run` `submit` | 目标语言 |
+| `--lang <L>` | 见下 | `show` `run` `submit` | 目标语言；优先级：`--lang` > `lc config lang` > `python3` |
 | `--timeout <ms>` | `120000` | `run` `submit` | 超时，同时透传给 LeetCode |
 
 ### 各命令选项
@@ -175,7 +177,8 @@ solutions/
 - **判题结果**：输出摘要（状态 / 通过用例 / 耗时 / 内存 / 提交 ID / 详情链接），
   失败时直接给出首个失败用例的输入、期望与实际。判题未通过时退出码为 `1`。
 - **题面语言**：`show` 优先展示中文标题与题面（直连 leetcode.cn 公开接口，无需登录）；
-  取不到中文时自动回退英文。
+  取不到中文时自动回退英文。上标/下标会渲染为 `x_i^y_i` 这类纯文本，不丢数学语义。
+- **文件题面注释**：`show` 生成的文件顶部带题目注释（标题 + 完整题面，按语言用 `#` / `//`）。
 - 退出码：成功 `0`，出错 `1`。
 
 ---
@@ -183,7 +186,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 88 个单元/集成测试（node:test）
+npm test           # 97 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。
