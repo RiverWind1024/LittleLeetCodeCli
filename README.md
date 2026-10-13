@@ -29,6 +29,7 @@
 - [开发](#开发)
 - [故障排查](#故障排查)
 - [致谢](#致谢)
+- [License](#license)
 
 ---
 
@@ -216,3 +217,9 @@ VS Code 用户还可以在 `.vscode/mcp.json` 里直接挂同一个 MCP server�
 `lc` 本体只做命令行交互与本地文件管理，真正的 LeetCode 通信、GraphQL 查询、判题轮询都在这个 MCP server 里完成。没有它就没有这个工具，感谢作者的开源与维护。
 
 同时也感谢 LeetCode 提供的平台，以及所有开源社区的贡献者。
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 RiverWind1024
