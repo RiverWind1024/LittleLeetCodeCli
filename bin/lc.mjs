@@ -1,0 +1,814 @@
+#!/usr/bin/env node
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, chmodSync, realpathSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const COMMANDS = {
+  init: {
+    usage: "lc init",
+    desc: "初始化：安装 MCP 依赖并配置 Cookie（幂等）",
+    options: [],
+  },
+  config: {
+    usage: "lc config <get|set|unset|list> [key] [value]",
+    desc: "管理项目根 .env 配置（目前仅 session）",
+    options: [],
+  },
+  list: {
+    usage: "lc list [关键词] [选项]",
+    desc: "搜索题目，输出带边框表格",
+    options: [
+      ["--difficulty EASY|MEDIUM|HARD", "按难度筛选"],
+      ["--tags a,b", "按标签筛选，逗号分隔"],
+      ["--limit N", "返回条数，默认 20"],
+    ],
+  },
+  random: {
+    usage: "lc random [选项]",
+    desc: "随机抽取一题（只打印，不生成文件）",
+    options: [
+      ["--difficulty EASY|MEDIUM|HARD", "限定难度"],
+      ["--tags a,b", "限定标签，逗号分隔"],
+    ],
+  },
+  show: {
+    usage: "lc show <slug> [选项]",
+    desc: "下载题目、生成代码文件、打印中文题面",
+    options: [
+      ["--lang L", "目标语言，默认 python3"],
+      ["--force", "覆盖已存在的代码文件"],
+    ],
+  },
+  run: {
+    usage: "lc run <slug> [选项]",
+    desc: "用题目默认样例（或 --input）运行本地代码",
+    options: [
+      ["--lang L", "目标语言，默认 python3"],
+      ["--input \"...\"", "自定义测试输入；省略则用题目默认样例"],
+      ["--timeout ms", "超时，默认 120000"],
+    ],
+  },
+  submit: {
+    usage: "lc submit <slug> [选项]",
+    desc: "提交本地代码",
+    options: [
+      ["--lang L", "目标语言，默认 python3"],
+      ["--timeout ms", "超时，默认 120000"],
+    ],
+  },
+};
+
+export function printHelp(out = console.log) {
+  out("用法：lc <命令> [选项]");
+  out("（需在 LightLeetCodeCli 项目根目录执行；首次使用先运行 npm link）");
+  out("");
+  out("命令：");
+  const width = Math.max(...Object.values(COMMANDS).map((c) => strWidth(c.usage)));
+  for (const c of Object.values(COMMANDS)) {
+    out(`  ${c.usage}${" ".repeat(width - strWidth(c.usage))}  ${c.desc}`);
+  }
+  out("");
+  out("命令帮助：lc <命令> --help 或 lc help <命令>");
+  out(`默认 --lang python3（支持：${Object.keys(LANG_MAP).join(", ")}）。site 固定为 cn。`);
+}
+
+// 返回 false 表示命令不存在（调用方可据此设置退出码）
+export function printCommandHelp(command, out = console.log) {
+  const spec = COMMANDS[command];
+  if (!spec) return false;
+  out(`用法：${spec.usage}`);
+  out("");
+  out(spec.desc);
+  if (spec.options.length) {
+    out("");
+    out("选项：");
+    const w = Math.max(...spec.options.map(([f]) => strWidth(f)));
+    for (const [flag, desc] of spec.options) out(`  ${flag}${" ".repeat(w - strWidth(flag))}  ${desc}`);
+  }
+  return true;
+}
+
+export function parseArgs(argv) {
+  const flags = {};
+  const positionals = [];
+  let command = null;
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok === "-h") {
+      flags.help = true;
+    } else if (tok.startsWith("--")) {
+      const eq = tok.indexOf("=");
+      if (eq !== -1) {
+        flags[tok.slice(2, eq)] = tok.slice(eq + 1);
+      } else {
+        const key = tok.slice(2);
+        const next = argv[i + 1];
+        if (next !== undefined && !next.startsWith("--")) {
+          flags[key] = next;
+          i++;
+        } else {
+          flags[key] = true;
+        }
+      }
+    } else if (command === null) {
+      command = tok;
+    } else {
+      positionals.push(tok);
+    }
+  }
+  return { command, positionals, flags };
+}
+
+export const LANG_MAP = {
+  python3:    { langSlug: "python3",    fileName: "solution.py",   comment: "#" },
+  cpp:        { langSlug: "cpp",        fileName: "solution.cpp",  comment: "//" },
+  java:       { langSlug: "java",       fileName: "Solution.java", comment: "//" },
+  golang:     { langSlug: "golang",     fileName: "solution.go",   comment: "//" },
+  javascript: { langSlug: "javascript", fileName: "solution.js",   comment: "//" },
+  typescript: { langSlug: "typescript", fileName: "solution.ts",   comment: "//" },
+  rust:       { langSlug: "rust",       fileName: "solution.rs",   comment: "//" },
+  c:          { langSlug: "c",          fileName: "solution.c",    comment: "//" },
+};
+
+export function resolveNewPath(cwd, slug, questionId, lang) {
+  const id = String(questionId).padStart(4, "0");
+  return join(cwd, "solutions", `${id}-${slug}`, lang, LANG_MAP[lang].fileName);
+}
+
+export function findExisting(cwd, slug, lang) {
+  const root = join(cwd, "solutions");
+  if (!existsSync(root)) return { path: null, matches: [] };
+  const fileName = LANG_MAP[lang].fileName;
+  const matches = [];
+  for (const name of readdirSync(root)) {
+    if (!name.endsWith(`-${slug}`)) continue;
+    const p = join(root, name, lang, fileName);
+    if (existsSync(p)) matches.push(p);
+  }
+  matches.sort();
+  return { path: matches[0] ?? null, matches };
+}
+
+export function parseEnvContent(content) {
+  const map = {};
+  for (const raw of String(content).split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    const k = line.slice(0, eq).trim();
+    let v = line.slice(eq + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    map[k] = v;
+  }
+  return map;
+}
+
+export function loadEnv(cwd, env = process.env) {
+  const merged = { ...env };
+  const p = join(cwd, ".env");
+  if (existsSync(p)) {
+    const parsed = parseEnvContent(readFileSync(p, "utf8"));
+    for (const [k, v] of Object.entries(parsed)) {
+      if (merged[k] === undefined) merged[k] = v;
+    }
+  }
+  return { session: merged.LEETCODE_SESSION ?? "" };
+}
+
+export function setEnvVar(content, key, value) {
+  const lines = String(content).split("\n");
+  let found = false;
+  const out = lines.map((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) return line;
+    const eq = t.indexOf("=");
+    if (eq === -1) return line;
+    if (t.slice(0, eq).trim() === key) {
+      found = true;
+      return `${key}=${value}`;
+    }
+    return line;
+  });
+  if (!found) {
+    if (out.length && out[out.length - 1].trim() !== "") out.push("");
+    out.push(`${key}=${value}`);
+  }
+  return out.join("\n").replace(/\n*$/, "\n");
+}
+
+export function unsetEnvVar(content, key) {
+  const out = String(content).split("\n").filter((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) return true;
+    const eq = t.indexOf("=");
+    if (eq === -1) return true;
+    return t.slice(0, eq).trim() !== key;
+  });
+  return out.join("\n").replace(/\n*$/, "\n");
+}
+
+export function mask(v) {
+  const s = String(v);
+  return s.length <= 8 ? "*".repeat(s.length) : `${s.slice(0, 4)}****${s.slice(-4)}`;
+}
+
+function strWidth(s) {
+  let w = 0;
+  for (const ch of String(s)) {
+    w += /[\u2e80-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch) ? 2 : 1;
+  }
+  return w;
+}
+
+export function detectColor(stream = process.stdout, env = process.env) {
+  if (env.NO_COLOR !== undefined) return false;
+  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== "0") return true;
+  return Boolean(stream && stream.isTTY);
+}
+
+export function createStyle(enabled) {
+  const wrap = (code) => (s) => (enabled ? `\u001b[${code}m${s}\u001b[0m` : String(s));
+  return {
+    enabled,
+    bold: wrap(1),
+    dim: wrap(2),
+    red: wrap(31),
+    green: wrap(32),
+    yellow: wrap(33),
+    cyan: wrap(36),
+  };
+}
+
+export const style = createStyle(detectColor());
+
+const DIFFICULTY = {
+  EASY: { cn: "简单", color: "green" },
+  MEDIUM: { cn: "中等", color: "yellow" },
+  HARD: { cn: "困难", color: "red" },
+};
+
+export function difficultyLabel(difficulty) {
+  const key = String(difficulty ?? "").toUpperCase();
+  if (DIFFICULTY[key]) return DIFFICULTY[key];
+  return { cn: String(difficulty ?? "未知"), color: "dim" };
+}
+
+export function renderList(questions, { style: st = style } = {}) {
+  if (!questions || questions.length === 0) return "无匹配题目";
+  const header = ["难度", "标题", "slug"];
+  const rows = questions.map((q) => {
+    const d = difficultyLabel(q.difficulty);
+    const title = q.titleCn ? `${q.title} / ${q.titleCn}` : (q.title ?? "");
+    const slug = q.titleSlug ?? "";
+    return [
+      { plain: d.cn, styled: st[d.color](d.cn) },
+      { plain: title, styled: title },
+      { plain: slug, styled: st.dim(slug) },
+    ];
+  });
+  const widths = header.map((h, i) =>
+    Math.max(strWidth(h), ...rows.map((r) => strWidth(r[i].plain)))
+  );
+  const rule = (l, mid, r) => l + widths.map((w) => "─".repeat(w + 2)).join(mid) + r;
+  const fmt = (cells) =>
+    "│ " + cells.map((c, i) => c.styled + " ".repeat(Math.max(0, widths[i] - strWidth(c.plain)))).join(" │ ") + " │";
+  return [
+    rule("┌", "┬", "┐"),
+    fmt(header.map((h) => ({ plain: h, styled: st.bold(h) }))),
+    rule("├", "┼", "┤"),
+    ...rows.map(fmt),
+    rule("└", "┴", "┘"),
+  ].join("\n");
+}
+
+export function htmlToText(html) {
+  return String(html)
+    .replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi,
+      (_, inner) => "\n" + inner.replace(/<[^>]+>/g, "").split("\n").map((l) => (l.trim() ? "  " + l.trim() : "")).join("\n") + "\n")
+    .replace(/<li[^>]*>/gi, "  - ")
+    .replace(/<\/(p|div|pre|li|ul|ol|h[1-6]|blockquote|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+$/g, "").replace(/^[ \t]+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function resolveMcpBin(cwd) {
+  const local = join(cwd, "node_modules", ".bin", "leetcode-mcp-server");
+  if (existsSync(local)) return { cmd: local, args: [], local: true };
+  return { cmd: "npx", args: ["-y", "@jinzcdev/leetcode-mcp-server"], local: false };
+}
+
+export function callTool(name, toolArgs, opts = {}) {
+  const {
+    session = "",
+    cwd = process.cwd(),
+    timeoutMs = 120000,
+    resolveBin = resolveMcpBin,
+  } = opts;
+
+  return new Promise((resolve, reject) => {
+    const resolved = resolveBin(cwd);
+    const { cmd, args } = resolved;
+    if (resolved.local === false) {
+      process.stderr.write("提示：未找到本地 MCP server，回退使用 npx（可运行 lc init 安装到本地）。\n");
+    }
+    const env = { ...process.env };
+    if (session) env.LEETCODE_SESSION = session;
+
+    const child = spawn(cmd, [...args, "--site", "cn"], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    let buf = "";
+    let stderr = "";
+    let settled = false;
+
+    const timer = setTimeout(() => finish(new Error(`MCP 调用超时（${timeoutMs}ms）`)), timeoutMs);
+
+    function finish(err, data) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { child.stdin.end(); } catch { /* ignore */ }
+      child.kill();
+      if (err) reject(err); else resolve(data);
+    }
+
+    child.on("error", (e) => finish(new Error(`无法启动 MCP server：${e.message}`)));
+    child.stdin.on("error", () => { /* 写端提前关闭：交由 exit/超时 处理 */ });
+    child.on("exit", (code) => {
+      if (!settled) finish(new Error(`MCP server 提前退出（code ${code}）\n${stderr.trim()}`));
+    });
+    child.stderr.on("data", (d) => { stderr += d.toString(); });
+    child.stdout.on("data", (d) => {
+      buf += d.toString();
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch { continue; }
+        if (msg.id !== 2) continue;
+        if (msg.error) return finish(new Error(msg.error.message ?? "MCP 调用失败"));
+        const text = msg.result?.content?.[0]?.text ?? "";
+        let data;
+        try { data = JSON.parse(text); } catch { data = { raw: text }; }
+        return finish(null, data);
+      }
+    });
+
+    const send = (o) => child.stdin.write(JSON.stringify(o) + "\n");
+    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "lc", version: "1.0.0" } } });
+    send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: toolArgs } });
+  });
+}
+
+const SESSION_KEY = "LEETCODE_SESSION";
+
+function writeEnv(envPath, content) {
+  writeFileSync(envPath, content, { mode: 0o600 });
+  chmodSync(envPath, 0o600);
+}
+
+export function cmdConfig(opts, deps) {
+  const { cwd, out = console.log } = deps;
+  const [action, key, value] = opts.positionals;
+  const envPath = join(cwd, ".env");
+  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+
+  if (action === "set") {
+    if (key !== "session" || !value) throw new Error("用法：lc config set session <cookie>");
+    writeEnv(envPath, setEnvVar(current, SESSION_KEY, value));
+    out(`已写入 .env：${SESSION_KEY}=${mask(value)}`);
+  } else if (action === "get") {
+    if (key !== "session") throw new Error("用法：lc config get session");
+    const v = parseEnvContent(current)[SESSION_KEY] ?? "";
+    out(v ? mask(v) : "未设置");
+  } else if (action === "unset") {
+    if (key !== "session") throw new Error("用法：lc config unset session");
+    const has = Object.prototype.hasOwnProperty.call(parseEnvContent(current), SESSION_KEY);
+    if (!has) { out("未设置"); return; }
+    writeEnv(envPath, unsetEnvVar(current, SESSION_KEY));
+    out(`已移除 ${SESSION_KEY}`);
+  } else if (action === "list") {
+    const map = parseEnvContent(current);
+    const keys = Object.keys(map);
+    if (!keys.length) { out("（.env 为空）"); return; }
+    for (const k of keys) out(`${k}=${mask(map[k])}`);
+  } else {
+    throw new Error("用法：lc config <get|set|unset|list> [key] [value]");
+  }
+}
+
+async function promptCookieInteractive() {
+  const { createInterface } = await import("node:readline");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise((res) => rl.question("请输入 LEETCODE_SESSION Cookie（可留空跳过）：", res));
+  rl.close();
+  return answer;
+}
+
+export async function cmdInit(opts, deps) {
+  const { cwd, out = console.log, exec = spawnSync, promptCookie = promptCookieInteractive, env = process.env } = deps;
+  const bin = join(cwd, "node_modules", ".bin", "leetcode-mcp-server");
+
+  if (!existsSync(bin)) {
+    out("未检测到本地 MCP server，正在安装依赖…");
+    const r = exec("npm", ["install"], { cwd, stdio: "inherit" });
+    if (r.status !== 0) throw new Error("npm install 失败，请手动运行 npm install");
+  } else {
+    out("MCP server 依赖已就绪。");
+  }
+
+  const { session } = loadEnv(cwd, env);
+  if (session) {
+    out(`已配置 Cookie（${mask(session)}），跳过。`);
+  } else {
+    const cookie = await promptCookie();
+    if (cookie && cookie.trim()) {
+      const envPath = join(cwd, ".env");
+      const cur = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+      writeEnv(envPath, setEnvVar(cur, SESSION_KEY, cookie.trim()));
+      out("已写入 .env 的 LEETCODE_SESSION。");
+    } else {
+      out("未设置 Cookie，run/submit 暂不可用。可稍后运行：lc config set session <cookie>");
+    }
+  }
+  out("下一步：lc list / lc show <slug> / lc submit <slug>");
+}
+
+export async function cmdList(opts, deps) {
+  const { callTool: call = callTool, cwd, session = "", out = console.log } = deps;
+  const limit = Number(opts.flags.limit ?? 20);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
+  }
+  const args = { limit };
+  if (opts.positionals[0]) args.searchKeywords = opts.positionals[0];
+  const difficulty = normalizeDifficulty(opts.flags.difficulty);
+  if (difficulty) args.difficulty = difficulty;
+  if (opts.flags.tags) {
+    args.tags = String(opts.flags.tags).split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  const data = await call("search_problems", args, { session, cwd });
+  if (data && data.raw !== undefined) { out(String(data.raw)); return; }
+  out(renderList(data?.problems?.questions ?? [], { style: deps.style ?? style }));
+}
+
+const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"];
+
+export function normalizeDifficulty(v) {
+  if (v === undefined) return undefined;
+  const d = String(v).toUpperCase();
+  if (!DIFFICULTIES.includes(d)) {
+    throw new Error(`--difficulty 需为 ${DIFFICULTIES.join("|")}，收到：${v}`);
+  }
+  return d;
+}
+
+export function formatRandom(q, { style: st = style } = {}) {
+  const diff = difficultyLabel(q.difficulty);
+  const primary = q.titleCn || q.title || q.titleSlug;
+  const lines = ["随机一题", ""];
+  lines.push(`  ${st.bold(primary)}  ${st[diff.color](`[${diff.cn}]`)}`);
+  if (q.titleCn && q.title && q.title !== q.titleCn) lines.push(`  ${st.dim(q.title)}`);
+  if (Array.isArray(q.topicTags) && q.topicTags.length) lines.push(`  ${st.dim(q.topicTags.join(" · "))}`);
+  if (q.titleSlug) {
+    lines.push(`  ${st.dim(`https://leetcode.cn/problems/${q.titleSlug}/`)}`);
+    lines.push(`  ${st.dim(`lc show ${q.titleSlug}`)}`);
+  }
+  return lines.join("\n");
+}
+
+export async function cmdRandom(opts, deps) {
+  const {
+    callTool: call = callTool, cwd, session = "", out = console.log,
+    style: st = style, random = Math.random,
+  } = deps;
+  const args = {};
+  const difficulty = normalizeDifficulty(opts.flags.difficulty);
+  if (difficulty) args.difficulty = difficulty;
+  if (opts.flags.tags) {
+    args.tags = String(opts.flags.tags).split(",").map((s) => s.trim()).filter(Boolean);
+  }
+
+  const first = await call("search_problems", { ...args, limit: 1, offset: 0 }, { session, cwd });
+  if (first && first.raw !== undefined) { out(String(first.raw)); return; }
+  const total = first?.problems?.total ?? 0;
+  if (total <= 0) throw new Error("没有符合条件的题目");
+
+  const offset = Math.min(Math.floor(random() * total), total - 1);
+  const data = offset === 0 ? first : await call("search_problems", { ...args, limit: 1, offset }, { session, cwd });
+  if (data && data.raw !== undefined) { out(String(data.raw)); return; }
+  const question = data?.problems?.questions?.[0];
+  if (!question) throw new Error("未取到题目，请稍后重试");
+  out(formatRandom(question, { style: st }));
+}
+
+const TRANSLATED_QUERY =
+  "query($t:String!){question(titleSlug:$t){translatedTitle translatedContent}}";
+
+// MCP 的 get_problem 只返回英文 content；这里直连 leetcode.cn 公开 GraphQL 取中文题面。
+// 任何失败都静默回退（返回 null），不影响 show 主体流程。
+export async function fetchTranslated(slug, { fetchImpl = fetch, timeoutMs = 8000 } = {}) {
+  try {
+    const res = await fetchImpl("https://leetcode.cn/graphql/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        referer: `https://leetcode.cn/problems/${slug}/`,
+      },
+      body: JSON.stringify({ query: TRANSLATED_QUERY, variables: { t: slug } }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res || !res.ok) return null;
+    const q = (await res.json())?.data?.question;
+    if (!q) return null;
+    return { title: q.translatedTitle || null, content: q.translatedContent || null };
+  } catch {
+    return null;
+  }
+}
+
+export async function cmdShow(opts, deps) {
+  const {
+    callTool: call = callTool, cwd, session = "", out = console.log, style: st = style,
+    fetchTranslated: fetchZh = fetchTranslated,
+  } = deps;
+  const slug = opts.positionals[0];
+  if (!slug) throw new Error("用法：lc show <slug> [--lang L] [--force]");
+  const lang = opts.flags.lang ?? "python3";
+  const meta = LANG_MAP[lang];
+  if (!meta) throw new Error(`不支持的语言：${lang}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
+
+  const data = await call("get_problem", { titleSlug: slug }, { session, cwd });
+  if (data && data.raw !== undefined) { out(String(data.raw)); return; }
+  const problem = data?.problem ?? data;
+  if (problem.questionId === undefined || problem.questionId === null) {
+    throw new Error("get_problem 未返回 questionId，无法生成目录名");
+  }
+  const path = resolveNewPath(cwd, slug, problem.questionId, lang);
+
+  if (existsSync(path) && !opts.flags.force) {
+    out(`${st.dim("已存在，跳过：")}${path}${st.dim("（--force 覆盖）")}`);
+  } else {
+    const snippet = (problem.codeSnippets ?? []).find((s) => s.langSlug === meta.langSlug);
+    const code = snippet ? `${snippet.code}\n` : `${meta.comment} TODO: implement\n`;
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, code);
+    out(`${st.green("✓ 已生成：")}${path}`);
+  }
+  const zh = await fetchZh(slug);
+  const title = zh?.title || problem.title || slug;
+  const content = zh?.content || problem.content || "";
+  const diff = difficultyLabel(problem.difficulty);
+  out("");
+  out(`${st.bold(title)}  ${st[diff.color](`[${diff.cn}]`)}`);
+  out(st.dim(`https://leetcode.cn/problems/${slug}/`));
+  out("");
+  out(htmlToText(content));
+}
+
+function emit(out, data, st, setExitCode = (n) => { process.exitCode = n; }) {
+  if (data && typeof data === "object" && data.raw !== undefined) { out(String(data.raw)); return; }
+  out(formatVerdict(data, { style: st }));
+  if (!verdictOk(data)) setExitCode(1);
+}
+
+export function extractCheck(data) {
+  if (!data || typeof data !== "object") return null;
+  return data.check ?? data;
+}
+
+const meaningful = (v) =>
+  v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0) && String(v).trim() !== "";
+
+function pickFailure(c) {
+  if (c.last_testcase) {
+    return { input: c.last_testcase, expected: c.expected_output, actual: c.std_output ?? c.code_output };
+  }
+  const got = c.std_output_list;
+  const exp = c.expected_std_output_list;
+  if (Array.isArray(got) && got.length) {
+    let i = got.findIndex((v, idx) => String(v).trim() !== String(exp?.[idx] ?? "").trim());
+    if (i === -1) i = 0;
+    return { input: `用例 #${i + 1}`, expected: exp?.[i], actual: got[i] };
+  }
+  if (meaningful(c.code_answer)) {
+    return { input: "返回值", expected: c.expected_code_answer, actual: c.code_answer };
+  }
+  return null;
+}
+
+export function verdictOk(data) {
+  const c = extractCheck(data);
+  if (!c) return false;
+  // 注意：run_code 的 state 恒为 "SUCCESS"（表示「执行完成」），不能用来判定正确与否。
+  return c.correct_answer === true || /accepted/i.test(String(c.status_msg ?? ""));
+}
+
+export function formatVerdict(raw, { style: st = style } = {}) {
+  const c = extractCheck(raw);
+  const url = raw?.checkUrl ? "  " + st.dim(raw.checkUrl) : "";
+
+  // 服务器偶尔在判题结果就绪前返回（无 check / 无 status_msg）：如实说明，不要误报为失败
+  if (!c || c.status_msg === undefined) {
+    return [
+      st.yellow("… 未取到判题结果（可能仍在判题中，可稍后重试）"),
+      url,
+    ].filter(Boolean).join("\n");
+  }
+
+  const status = c.status_msg ?? c.state ?? "未知";
+  const ok = verdictOk(raw);
+  const lines = [`${ok ? st.green("✓") : st.red("✗")} ${st.bold(ok ? st.green(status) : st.red(status))}`];
+
+  const bits = [];
+  // 「击败 X%」：仅在百分位是数值时附加到对应指标
+  const beated = (v) => (typeof v === "number" ? `（击败 ${v.toFixed(1)}%）` : "");
+  if (c.total_testcases != null) bits.push(`${c.total_correct ?? 0}/${c.total_testcases} 用例`);
+  if (c.elapsed_time != null) bits.push(`${c.elapsed_time}ms${beated(c.runtime_percentile)}`);
+  else if (c.status_runtime && c.status_runtime !== "N/A") bits.push(String(c.status_runtime));
+  if (c.status_memory && c.status_memory !== "N/A") bits.push(`${c.status_memory}${beated(c.memory_percentile)}`);
+  else if (typeof c.memory === "number" && c.memory > 0) bits.push(`${(c.memory / 1e6).toFixed(1)} MB${beated(c.memory_percentile)}`);
+  const id = c.submission_id ?? raw?.start?.submission_id ?? raw?.start?.interpret_id;
+  if (id) bits.push(`ID ${id}`);
+  if (bits.length) lines.push("  " + st.dim(bits.join("  ·  ")));
+
+  if (!ok) {
+    if (c.invalid_testcase) {
+      lines.push("");
+      lines.push("  " + st.yellow("测试数据格式不被 LeetCode 接受（--input 写法有误？）"));
+    }
+    // 优先用 full_* 版本：它带出错行与源码上下文，runtime_error/compile_error 只是首行摘要
+    const errText = c.full_runtime_error || c.runtime_error || c.full_compile_error || c.compile_error;
+    if (errText) {
+      lines.push("");
+      for (const l of String(errText).replace(/\s+$/, "").split("\n")) lines.push("  " + st.red(l));
+    }
+    const f = pickFailure(c);
+    if (f) {
+      const rows = [["输入", f.input], ["期望", f.expected], ["实际", f.actual]].filter(([, v]) => meaningful(v));
+      if (rows.length) {
+        lines.push("");
+        lines.push("  " + st.yellow("首个失败用例"));
+        for (const [k, v] of rows) {
+          const vs = String(v).replace(/\s+$/, "").split("\n");
+          lines.push(`    ${st.dim(k)}  ${vs[0]}`);
+          const pad = " ".repeat(4 + strWidth(k) + 2);
+          for (let i = 1; i < vs.length; i++) lines.push(pad + vs[i]);
+        }
+      }
+    }
+  }
+  if (url) lines.push(url);
+  return lines.join("\n");
+}
+
+function requireSession(session) {
+  if (!session) {
+    throw new Error("该操作需要登录：请先运行 lc init，或 lc config set session <cookie>。\nCookie 获取方法：浏览器登录 leetcode.cn → F12 → Application → Cookies → 复制 LEETCODE_SESSION 的值。");
+  }
+}
+
+function pickCodeFile(cwd, slug, lang, out) {
+  const meta = LANG_MAP[lang];
+  if (!meta) throw new Error(`不支持的语言：${lang}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
+  const { path, matches } = findExisting(cwd, slug, lang);
+  if (!path) throw new Error(`找不到代码文件，请先运行：lc show ${slug} --lang ${lang}`);
+  if (matches.length > 1) {
+    out(`注意：匹配到多个文件，使用第一个：\n${matches.map((m) => "  " + m).join("\n")}`);
+  }
+  return { path, meta };
+}
+
+function parseTimeout(flag) {
+  if (flag === undefined) return 120000;
+  const ms = Number(flag);
+  if (!Number.isInteger(ms) || ms <= 0) {
+    throw new Error(`--timeout 需为正整数毫秒数，收到：${flag}`);
+  }
+  return ms;
+}
+
+export async function cmdRun(opts, deps) {
+  const { callTool: call = callTool, cwd, session = "", out = console.log, style: st = style, setExitCode } = deps;
+  const slug = opts.positionals[0];
+  if (!slug) throw new Error("用法：lc run <slug> [--lang L] [--input \"...\"] [--timeout ms]");
+  requireSession(session);
+  const lang = opts.flags.lang ?? "python3";
+  const { path, meta } = pickCodeFile(cwd, slug, lang, out);
+  const timeoutMs = parseTimeout(opts.flags.timeout);
+  const args = {
+    titleSlug: slug,
+    lang: meta.langSlug,
+    typedCode: readFileSync(path, "utf8"),
+    timeoutMs,
+  };
+  if (opts.flags.input) args.dataInput = String(opts.flags.input);
+  const data = await call("run_code", args, { session, cwd, timeoutMs: timeoutMs + 5000 });
+  emit(out, data, st, setExitCode);
+}
+
+export async function cmdSubmit(opts, deps) {
+  const { callTool: call = callTool, cwd, session = "", out = console.log, style: st = style, setExitCode } = deps;
+  const slug = opts.positionals[0];
+  if (!slug) throw new Error("用法：lc submit <slug> [--lang L] [--timeout ms]");
+  requireSession(session);
+  const lang = opts.flags.lang ?? "python3";
+  const { path, meta } = pickCodeFile(cwd, slug, lang, out);
+  const timeoutMs = parseTimeout(opts.flags.timeout);
+  const data = await call("submit_solution", {
+    titleSlug: slug,
+    lang: meta.langSlug,
+    typedCode: readFileSync(path, "utf8"),
+    timeoutMs,
+  }, { session, cwd, timeoutMs: timeoutMs + 5000 });
+  emit(out, data, st, setExitCode);
+}
+
+const PROJECT_NAME = "light-leetcode-cli";
+
+export function ensureProjectRoot(cwd) {
+  const pkgPath = join(cwd, "package.json");
+  if (existsSync(pkgPath)) {
+    try {
+      if (JSON.parse(readFileSync(pkgPath, "utf8")).name === PROJECT_NAME) return;
+    } catch { /* 落到下方错误提示 */ }
+  }
+  throw new Error(
+    `当前目录不是 LightLeetCodeCli 项目根目录：${cwd}\n` +
+    `请切换到项目根目录后再运行 lc`
+  );
+}
+
+export async function main(argv = process.argv.slice(2), deps = {}) {
+  const d = {
+    cwd: process.cwd(),
+    out: (s = "") => console.log(s),
+    errOut: (s = "") => console.error(s),
+    callTool,
+    exec: spawnSync,
+    promptCookie: promptCookieInteractive,
+    ...deps,
+  };
+
+  const opts = parseArgs(argv);
+
+  // 帮助优先于项目根守卫：任何目录下都能查看用法
+  if (opts.command === "help" || opts.flags.help === true) {
+    const target = opts.command === "help" ? opts.positionals[0] : opts.command;
+    if (target && !COMMANDS[target]) {
+      d.errOut(`未知命令：${target}`);
+      printHelp(d.out);
+      process.exitCode = 1;
+    } else if (target) {
+      printCommandHelp(target, d.out);
+    } else {
+      printHelp(d.out);
+    }
+    return;
+  }
+
+  const { session } = loadEnv(d.cwd);
+
+  try {
+    ensureProjectRoot(d.cwd);
+    switch (opts.command) {
+      case "init":    await cmdInit(opts, d); break;
+      case "config":  cmdConfig(opts, d); break;
+      case "list":    await cmdList(opts, { ...d, session }); break;
+      case "random":  await cmdRandom(opts, { ...d, session }); break;
+      case "show":    await cmdShow(opts, { ...d, session }); break;
+      case "run":     await cmdRun(opts, { ...d, session }); break;
+      case "submit":  await cmdSubmit(opts, { ...d, session }); break;
+      case null:      printHelp(d.out); break;
+      default:
+        d.errOut(`未知命令：${opts.command}`);
+        printHelp(d.out);
+        process.exitCode = 1;
+    }
+  } catch (e) {
+    d.errOut(`错误：${e.message}`);
+    process.exitCode = 1;
+  }
+}
+
+// 入口守卫：npm link / 全局安装会以软链方式调用，此时 argv[1] 是软链路径，
+// 而 import.meta.url 已是真实路径，故先 realpath 再比较。
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
