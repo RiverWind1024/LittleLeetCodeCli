@@ -27,7 +27,7 @@ export function loadEnv(cwd, env = process.env) {
       if (merged[k] === undefined) merged[k] = v;
     }
   }
-  return { session: merged.LEETCODE_SESSION ?? "" };
+  return { session: merged.LEETCODE_SESSION ?? "", env: merged };
 }
 
 export function setEnvVar(content, key, value) {
@@ -88,8 +88,15 @@ export function createStyle(enabled) {
 
 export const style = createStyle(detectColor());
 
+export function resolveLocale(env = process.env) {
+  const explicit = String(env.LC_LOCALE ?? "").trim().toLowerCase();
+  if (explicit.startsWith("zh")) return "zh";
+  if (explicit.startsWith("en")) return "en";
+  return /^zh/i.test(env.LC_ALL || env.LANG || "") ? "zh" : "en";
+}
+
 export function isChineseEnv(env = process.env) {
-  return /^zh/i.test(env.LC_ALL || env.LANG || "");
+  return resolveLocale(env) === "zh";
 }
 
 export function strWidth(s) {

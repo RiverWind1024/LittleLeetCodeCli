@@ -42,6 +42,7 @@ import {
   detectColor,
   createStyle,
   isChineseEnv,
+  resolveLocale,
   htmlToText,
 } from "../bin/utils.js";
 import {
@@ -196,6 +197,7 @@ test("loadEnv 合并 .env 且环境变量优先", () => {
   writeFileSync(join(cwd, ".env"), "LEETCODE_SESSION=from_file\n");
   assert.equal(loadEnv(cwd, { LEETCODE_SESSION: "from_env" }).session, "from_env");
   assert.equal(loadEnv(cwd, {}).session, "from_file");
+  assert.equal(loadEnv(cwd, { LC_LOCALE: "en" }).env.LC_LOCALE, "en");
 });
 
 test("setEnvVar 更新/追加键并保留注释", () => {
@@ -242,6 +244,17 @@ test("isChineseEnv 识别中文环境", () => {
   assert.equal(isChineseEnv({ LC_ALL: "zh_CN" }), true);
   assert.equal(isChineseEnv({ LANG: "zh_CN.UTF-8", LC_ALL: "en_US.UTF-8" }), false);
   assert.equal(isChineseEnv({}), false);
+});
+
+test("resolveLocale: LC_LOCALE 优先于 LC_ALL/LANG，支持 zh/en/auto", () => {
+  assert.equal(resolveLocale({ LC_LOCALE: "en", LANG: "zh_CN.UTF-8" }), "en");
+  assert.equal(resolveLocale({ LC_LOCALE: "zh", LANG: "en_US.UTF-8" }), "zh");
+  assert.equal(resolveLocale({ LC_LOCALE: "EN" }), "en");
+  assert.equal(resolveLocale({ LC_LOCALE: "zh_CN" }), "zh");
+  assert.equal(resolveLocale({ LC_LOCALE: "auto", LANG: "zh_CN.UTF-8" }), "zh");
+  assert.equal(resolveLocale({ LC_LOCALE: "auto", LANG: "en_US.UTF-8" }), "en");
+  assert.equal(resolveLocale({ LC_LOCALE: "", LANG: "zh_CN.UTF-8" }), "zh");
+  assert.equal(resolveLocale({}), "en");
 });
 
 test("resolveTitle 按语言取标题并回退", () => {
