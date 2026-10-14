@@ -274,7 +274,7 @@ export async function cmdProgress(opts, deps) {
     cwd, session, refresh: opts.flags.refresh === true, timeoutMs, callTool: call, now,
   });
   if (stale) warn("注意：已解决列表刷新失败，已使用过期缓存");
-  out(renderProgressSummary(solved, { style: st }));
+  out(renderProgressSummary(solved, { style: st, zh: deps.zh ?? isChineseEnv() }));
   out(renderSolvedTable(solved, { style: st, zh: deps.zh ?? isChineseEnv(), difficulty, limit, offset }));
 }
 

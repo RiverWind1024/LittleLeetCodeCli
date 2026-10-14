@@ -220,7 +220,7 @@ test("mask 遮蔽中间字符", () => {
   assert.equal(mask("short"), "*****");
 });
 
-test("renderList 渲染带边框表格、中文难度并处理空列表", () => {
+test("renderList 渲染带边框表格、英文表头与难度并处理空列表", () => {
   const out = renderList([
     { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" },
     { difficulty: "HARD", title: "Hard One", titleSlug: "hard-one" },
@@ -228,13 +228,15 @@ test("renderList 渲染带边框表格、中文难度并处理空列表", () => 
   const lines = out.split("\n");
   assert.match(lines[0], /^┌/);
   assert.match(lines[lines.length - 1], /┘$/);
-  assert.match(lines[1], /难度/);
-  assert.match(lines[1], /slug/);
-  assert.match(out, /简单/);
-  assert.match(out, /困难/);
+  assert.match(lines[1], /DIFFICULTY/);
+  assert.match(lines[1], /TITLE/);
+  assert.match(lines[1], /SLUG/);
+  assert.match(out, /EASY/);
+  assert.match(out, /HARD/);
   assert.match(out, /Two Sum/);
-  assert.doesNotMatch(out, /EASY|HARD/);
-  assert.equal(renderList([]), "无匹配题目");
+  assert.doesNotMatch(out, /难度|简单/);
+  assert.equal(renderList([], { zh: false }), "No matching problems");
+  assert.equal(renderList([], { zh: true }), "无匹配题目");
 });
 
 test("isChineseEnv 识别中文环境", () => {
@@ -281,12 +283,12 @@ test("renderList 标题按语言显示单列并回退", () => {
 test("renderList 提供 solved 集合时显示状态列，否则不显示", () => {
   const row = { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" };
   const withSolved = renderList([row], { zh: false, solved: new Set(["two-sum"]) });
-  assert.match(withSolved, /状态/);
+  assert.match(withSolved, /STATUS/);
   assert.match(withSolved, /✓/);
   const unsolved = renderList([row], { zh: false, solved: new Set(["other"]) });
   assert.doesNotMatch(unsolved, /✓/);
   const without = renderList([row], { zh: false });
-  assert.doesNotMatch(without, /状态/);
+  assert.doesNotMatch(without, /STATUS/);
 });
 
 test("normalizeDifficulty 归一化并校验", () => {
@@ -714,7 +716,8 @@ test("renderProgressSummary 统计已解决数量与难度分布", () => {
     PQ("b", "2026-01-02", { difficulty: "MEDIUM" }),
     PQ("c", "2026-01-03", { difficulty: "HARD" }),
   ];
-  assert.equal(renderProgressSummary(solved), "已解决 3 · 简单 1 · 中等 1 · 困难 1");
+  assert.equal(renderProgressSummary(solved, { zh: true }), "已解决 3 · 简单 1 · 中等 1 · 困难 1");
+  assert.equal(renderProgressSummary(solved, { zh: false }), "Solved 3 · EASY 1 · MID 1 · HARD 1");
 });
 
 test("renderSolvedTable 渲染难度/标题/slug/日期/次数并支持过滤与分页", () => {
@@ -725,11 +728,21 @@ test("renderSolvedTable 渲染难度/标题/slug/日期/次数并支持过滤与
   ];
   const all = renderSolvedTable(solved, { zh: true });
   assert.match(all, /难度/);
-  assert.match(all, /slug/);
+  assert.match(all, /标题/);
+  assert.match(all, /题号/);
   assert.match(all, /最近提交/);
   assert.match(all, /次数/);
   assert.match(all, /2026-02-10/);
   assert.doesNotMatch(all, /T08:00:00/);
+
+  const allEn = renderSolvedTable(solved, { zh: false });
+  assert.match(allEn, /DIFFICULTY/);
+  assert.match(allEn, /TITLE/);
+  assert.match(allEn, /SLUG/);
+  assert.match(allEn, /EASY/);
+  assert.match(allEn, /MID/);
+  assert.match(allEn, /HARD/);
+
   const filtered = renderSolvedTable(solved, { zh: true, difficulty: "MEDIUM" });
   assert.match(filtered, /b/);
   assert.doesNotMatch(filtered, /c/);
@@ -743,7 +756,7 @@ test("cmdProgress 需要登录，成功后输出统计与表格", async () => {
   const dir = fakeRoot();
   await assert.rejects(
     cmdProgress({ positionals: [], flags: {} }, {
-      cwd: dir, session: "", out: () => {}, warn: () => {},
+      cwd: dir, session: "", out: () => {}, warn: () => {}, zh: true,
       callTool: async () => { throw new Error("不应调用"); },
     }),
     /需要登录/
@@ -751,7 +764,7 @@ test("cmdProgress 需要登录，成功后输出统计与表格", async () => {
   const dir2 = fakeRoot();
   const out2 = [];
   await cmdProgress({ positionals: [], flags: {} }, {
-    cwd: dir2, session: "s", out: (s) => out2.push(s),
+    cwd: dir2, session: "s", out: (s) => out2.push(s), zh: true,
     callTool: async (name) => ({ questions: { totalNum: 2, questions: [PQ("a", "2026-01-01"), PQ("b", "2026-01-02", { difficulty: "HARD" })] } }),
   });
   assert.match(out2[0], /已解决 2 · 简单 1 · 中等 0 · 困难 1/);
@@ -766,7 +779,7 @@ test("cmdProgress 支持 --difficulty/--limit/--offset，stale 时告警", async
   writeFileSync(join(dir, ".lc-cache", "solved.json"),
     JSON.stringify({ fetchedAt: 0, solved: [NORM("a", "2026-01-01"), NORM("b", "2026-01-02", { difficulty: "HARD" })] }));
   await cmdProgress({ positionals: [], flags: { difficulty: "hard" } }, {
-    cwd: dir, session: "s", out: (s) => out.push(s), warn: (s) => warnings.push(s),
+    cwd: dir, session: "s", out: (s) => out.push(s), warn: (s) => warnings.push(s), zh: true,
     callTool: async () => { throw new Error("net down"); },
   });
   assert.equal(warnings.length, 1, "stale 应告警");
@@ -777,7 +790,7 @@ test("cmdProgress 支持 --difficulty/--limit/--offset，stale 时告警", async
   const out2 = [];
   const dir3 = fakeRoot();
   await cmdProgress({ positionals: [], flags: { limit: "1", offset: "1" } }, {
-    cwd: dir3, session: "s", out: (s) => out2.push(s),
+    cwd: dir3, session: "s", out: (s) => out2.push(s), zh: true,
     callTool: async () => ({ questions: { totalNum: 2, questions: [PQ("a", "2026-01-01"), PQ("b", "2026-01-02")] } }),
   });
   assert.match(out2.join("\n"), /a/);
