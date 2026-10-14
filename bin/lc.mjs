@@ -8,99 +8,114 @@ import {
 } from "./utils.js";
 import { renderProgressSummary, renderSolvedTable,renderList,difficultyLabel } from "./render.js";
 
+const PICK = (v, zh) => (zh ? v.zh : v.en);
+
 const COMMANDS = {
   init: {
     usage: "lc init",
-    desc: "初始化：安装 MCP 依赖并配置 Cookie（幂等）",
+    desc: { zh: "初始化：安装 MCP 依赖并配置 Cookie（幂等）", en: "Initialize: install MCP deps and configure Cookie (idempotent)" },
     options: [],
   },
   config: {
-    usage: "lc config <get|set|unset|list> [session|lang] [value]",
-    desc: "管理项目根 .env 配置：session（登录 Cookie）、lang（默认编程语言）",
+    usage: "lc config <get|set|unset|list> [session|lang|locale] [value]",
+    desc: { zh: "管理项目根 .env 配置：session（登录 Cookie）、lang（默认编程语言）、locale（显示语言）", en: "Manage project-root .env: session (login Cookie), lang (default language), locale (display language)" },
     options: [],
   },
   list: {
     usage: "lc list [关键词] [选项]",
-    desc: "搜索题目，输出带边框表格",
+    desc: { zh: "搜索题目，输出带边框表格", en: "Search problems and print a bordered table" },
     options: [
-      ["--difficulty EASY|MEDIUM|HARD", "按难度筛选"],
-      ["--tags a,b", "按标签筛选，逗号分隔"],
-      ["--limit N", "返回条数，默认 20"],
-      ["--offset N", "偏移，默认 0"],
-      ["--refresh", "强制重新抓取已解决状态缓存"],
+      ["--difficulty EASY|MEDIUM|HARD", { zh: "按难度筛选", en: "Filter by difficulty" }],
+      ["--tags a,b", { zh: "按标签筛选，逗号分隔", en: "Filter by tags, comma-separated" }],
+      ["--limit N", { zh: "返回条数，默认 20", en: "Number of results, default 20" }],
+      ["--offset N", { zh: "偏移，默认 0", en: "Offset, default 0" }],
+      ["--refresh", { zh: "强制重新抓取已解决状态缓存", en: "Force-refresh the solved-status cache" }],
     ],
   },
   progress: {
     usage: "lc progress [选项]",
-    desc: "展示已解决的题目：统计 + 表格（需登录）",
+    desc: { zh: "展示已解决的题目：统计 + 表格（需登录）", en: "Show solved problems: summary + table (login required)" },
     options: [
-      ["--difficulty EASY|MEDIUM|HARD", "仅统计/展示该难度"],
-      ["--limit N", "每页条数，默认 20"],
-      ["--offset N", "跳过前 N 条，默认 0"],
-      ["--refresh", "忽略缓存，强制重新抓取已解决列表"],
+      ["--difficulty EASY|MEDIUM|HARD", { zh: "仅统计/展示该难度", en: "Only count/show this difficulty" }],
+      ["--limit N", { zh: "每页条数，默认 20", en: "Rows per page, default 20" }],
+      ["--offset N", { zh: "跳过前 N 条，默认 0", en: "Skip the first N rows, default 0" }],
+      ["--refresh", { zh: "忽略缓存，强制重新抓取已解决列表", en: "Ignore cache and re-fetch the solved list" }],
     ],
   },
   random: {
     usage: "lc random [选项]",
-    desc: "随机抽取一题（只打印，不生成文件）",
+    desc: { zh: "随机抽取一题（只打印，不生成文件）", en: "Pick a random problem (print only, no file)" },
     options: [
-      ["--difficulty EASY|MEDIUM|HARD", "限定难度"],
-      ["--tags a,b", "限定标签，逗号分隔"],
+      ["--difficulty EASY|MEDIUM|HARD", { zh: "限定难度", en: "Restrict difficulty" }],
+      ["--tags a,b", { zh: "限定标签，逗号分隔", en: "Restrict tags, comma-separated" }],
     ],
   },
   show: {
     usage: "lc show <slug> [选项]",
-    desc: "下载题目、生成代码文件、打印中文题面",
+    desc: { zh: "下载题目、生成代码文件、打印题面", en: "Fetch a problem, generate the code file, print the statement" },
     options: [
-      ["--lang L", "目标语言，默认取 lc config lang，未设置则 python3"],
-      ["--force", "覆盖已存在的代码文件"],
+      ["--lang L", { zh: "目标语言，默认取 lc config lang，未设置则 python3", en: "Target language; default from lc config lang, else python3" }],
+      ["--force", { zh: "覆盖已存在的代码文件", en: "Overwrite an existing code file" }],
     ],
   },
   run: {
     usage: "lc run <slug> [选项]",
-    desc: "用题目默认样例（或 --input）运行本地代码",
+    desc: { zh: "用题目默认样例（或 --input）运行本地代码", en: "Run local code with the problem's default sample (or --input)" },
     options: [
-      ["--lang L", "目标语言，默认取 lc config lang，未设置则 python3"],
-      ["--input \"...\"", "自定义测试输入；省略则用题目默认样例"],
-      ["--timeout ms", "超时，默认 120000"],
+      ["--lang L", { zh: "目标语言，默认取 lc config lang，未设置则 python3", en: "Target language; default from lc config lang, else python3" }],
+      ["--input \"...\"", { zh: "自定义测试输入；省略则用题目默认样例", en: "Custom test input; omit to use the problem's default sample" }],
+      ["--timeout ms", { zh: "超时，默认 120000", en: "Timeout, default 120000" }],
     ],
   },
   submit: {
     usage: "lc submit <slug> [选项]",
-    desc: "提交本地代码",
+    desc: { zh: "提交本地代码", en: "Submit local code" },
     options: [
-      ["--lang L", "目标语言，默认取 lc config lang，未设置则 python3"],
-      ["--timeout ms", "超时，默认 120000"],
+      ["--lang L", { zh: "目标语言，默认取 lc config lang，未设置则 python3", en: "Target language; default from lc config lang, else python3" }],
+      ["--timeout ms", { zh: "超时，默认 120000", en: "Timeout, default 120000" }],
     ],
   },
 };
 
-export function printHelp(out = console.log) {
-  out("用法：lc <命令> [选项]");
-  out("（需在 LittleLeetCodeCli 项目根目录执行；首次使用先运行 npm link）");
+export function printHelp(out = console.log, { zh = isChineseEnv() } = {}) {
+  const t = zh ? {
+    usage: "用法：lc <命令> [选项]",
+    note: "（需在 LittleLeetCodeCli 项目根目录执行；首次使用先运行 npm link）",
+    commands: "命令：",
+    helpHint: "命令帮助：lc <命令> --help 或 lc help <命令>",
+    footer: `默认语言：lc config lang（未设置则 python3）；--lang 可临时覆盖。支持：${Object.keys(LANG_MAP).join(", ")}。site 固定为 cn。`,
+  } : {
+    usage: "Usage: lc <command> [options]",
+    note: "(Run inside the LittleLeetCodeCli project root; run `npm link` first)",
+    commands: "Commands:",
+    helpHint: "Command help: lc <command> --help or lc help <command>",
+    footer: `Default language: lc config lang (python3 if unset); --lang overrides. Supported: ${Object.keys(LANG_MAP).join(", ")}. Site is fixed to cn.`,
+  };
+  out(t.usage);
+  out(t.note);
   out("");
-  out("命令：");
+  out(t.commands);
   const width = Math.max(...Object.values(COMMANDS).map((c) => strWidth(c.usage)));
   for (const c of Object.values(COMMANDS)) {
-    out(`  ${c.usage}${" ".repeat(width - strWidth(c.usage))}  ${c.desc}`);
+    out(`  ${c.usage}${" ".repeat(width - strWidth(c.usage))}  ${PICK(c.desc, zh)}`);
   }
   out("");
-  out("命令帮助：lc <命令> --help 或 lc help <命令>");
-  out(`默认语言：lc config lang（未设置则 python3）；--lang 可临时覆盖。支持：${Object.keys(LANG_MAP).join(", ")}。site 固定为 cn。`);
+  out(t.helpHint);
+  out(t.footer);
 }
 
 // 返回 false 表示命令不存在（调用方可据此设置退出码）
-export function printCommandHelp(command, out = console.log) {
+export function printCommandHelp(command, out = console.log, { zh = isChineseEnv() } = {}) {
   const spec = COMMANDS[command];
   if (!spec) return false;
-  out(`用法：${spec.usage}`);
+  out(`${zh ? "用法：" : "Usage: "}${spec.usage}`);
   out("");
-  out(spec.desc);
+  out(PICK(spec.desc, zh));
   if (spec.options.length) {
     out("");
-    out("选项：");
+    out(zh ? "选项：" : "Options:");
     const w = Math.max(...spec.options.map(([f]) => strWidth(f)));
-    for (const [flag, desc] of spec.options) out(`  ${flag}${" ".repeat(w - strWidth(flag))}  ${desc}`);
+    for (const [flag, desc] of spec.options) out(`  ${flag}${" ".repeat(w - strWidth(flag))}  ${PICK(desc, zh)}`);
   }
   return true;
 }
@@ -795,6 +810,9 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     ...deps,
   };
 
+  const { session, env: mergedEnv } = loadEnv(d.cwd);
+  d.zh = d.zh ?? isChineseEnv(mergedEnv);
+
   const opts = parseArgs(argv);
 
   // 帮助优先于项目根守卫：任何目录下都能查看用法
@@ -802,17 +820,15 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     const target = opts.command === "help" ? opts.positionals[0] : opts.command;
     if (target && !COMMANDS[target]) {
       d.errOut(`未知命令：${target}`);
-      printHelp(d.out);
+      printHelp(d.out, { zh: d.zh });
       process.exitCode = 1;
     } else if (target) {
-      printCommandHelp(target, d.out);
+      printCommandHelp(target, d.out, { zh: d.zh });
     } else {
-      printHelp(d.out);
+      printHelp(d.out, { zh: d.zh });
     }
     return;
   }
-
-  const { session } = loadEnv(d.cwd);
 
   try {
     ensureProjectRoot(d.cwd);
@@ -825,10 +841,10 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
       case "show":    await cmdShow(opts, { ...d, session }); break;
       case "run":     await cmdRun(opts, { ...d, session }); break;
       case "submit":  await cmdSubmit(opts, { ...d, session }); break;
-      case null:      printHelp(d.out); break;
+      case null:      printHelp(d.out, { zh: d.zh }); break;
       default:
         d.errOut(`未知命令：${opts.command}`);
-        printHelp(d.out);
+        printHelp(d.out, { zh: d.zh });
         process.exitCode = 1;
     }
   } catch (e) {

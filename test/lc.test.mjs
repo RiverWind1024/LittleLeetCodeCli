@@ -84,9 +84,9 @@ const NORM = (slug, date, extra = {}) => {
   };
 };
 
-test("printHelp 打印命令列表", () => {
+test("printHelp 打印命令列表（中文）", () => {
   const lines = [];
-  printHelp((s) => lines.push(s));
+  printHelp((s) => lines.push(s), { zh: true });
   const text = lines.join("\n");
   for (const cmd of ["init", "config", "list", "random", "progress", "show", "run", "submit"]) {
     assert.match(text, new RegExp(cmd));
@@ -94,14 +94,26 @@ test("printHelp 打印命令列表", () => {
   assert.match(text, /lc <命令> --help/);
 });
 
+test("printHelp 英文模式", () => {
+  const lines = [];
+  printHelp((s) => lines.push(s), { zh: false });
+  const text = lines.join("\n");
+  assert.match(text, /Usage: lc <command>/);
+  assert.match(text, /Command help/);
+});
+
 test("printCommandHelp 已知命令返回 true 并含选项，未知返回 false", () => {
   const lines = [];
-  assert.equal(printCommandHelp("list", (s) => lines.push(s)), true);
+  assert.equal(printCommandHelp("list", (s) => lines.push(s), { zh: true }), true);
   const text = lines.join("\n");
   assert.match(text, /用法：lc list/);
   assert.match(text, /--difficulty/);
   assert.match(text, /--tags/);
   assert.match(text, /--limit/);
+  assert.equal(printCommandHelp("list", () => {}, { zh: false }), true);
+  const linesEn = [];
+  printCommandHelp("list", (s) => linesEn.push(s), { zh: false });
+  assert.match(linesEn.join("\n"), /Usage: lc list/);
   assert.equal(printCommandHelp("nope", () => {}), false);
 });
 
@@ -116,7 +128,7 @@ test("main: lc <命令> --help 打印该命令用法且不调用 MCP", async () 
   const out = [];
   let called = false;
   await main(["submit", "--help"], {
-    cwd: tmp(), out: (s) => out.push(s),
+    cwd: tmp(), out: (s) => out.push(s), zh: true,
     callTool: async () => { called = true; return {}; },
   });
   assert.match(out.join("\n"), /用法：lc submit/);
@@ -125,14 +137,14 @@ test("main: lc <命令> --help 打印该命令用法且不调用 MCP", async () 
 
 test("main: lc help <命令> 与 --help 等价", async () => {
   const out = [];
-  await main(["help", "random"], { cwd: tmp(), out: (s) => out.push(s) });
+  await main(["help", "random"], { cwd: tmp(), out: (s) => out.push(s), zh: true });
   assert.match(out.join("\n"), /用法：lc random/);
 });
 
 test("main: 帮助无需在项目根目录也能用", async () => {
   const notRoot = tmp();
   const out = [];
-  await main(["list", "--help"], { cwd: notRoot, out: (s) => out.push(s) });
+  await main(["list", "--help"], { cwd: notRoot, out: (s) => out.push(s), zh: true });
   assert.match(out.join("\n"), /用法：lc list/);
 });
 
@@ -1210,6 +1222,7 @@ test("main 未登录时 list 仍可调用", async () => {
   await main(["list", "two"], {
     cwd,
     out: (s) => out.push(s),
+    zh: true,
     callTool: async (name) => { called = name; return { problems: { questions: [] } }; },
   });
   assert.equal(called, "search_problems");
@@ -1238,13 +1251,13 @@ test("CLI 经软链调用时仍能执行（npm link / 全局安装路径）", ()
   const dir = tmp();
   const link = join(dir, "lc-link");
   symlinkSync(fileURLToPath(new URL("../bin/lc.mjs", import.meta.url)), link);
-  const r = spawnSync(process.execPath, [link, "help"], { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" });
+  const r = spawnSync(process.execPath, [link, "help"], { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8", env: { ...process.env, LC_LOCALE: "zh" } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /lc <命令>/);
 });
 
 test("CLI 直接执行时打印帮助", () => {
-  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../bin/lc.mjs", import.meta.url)), "help"], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../bin/lc.mjs", import.meta.url)), "help"], { encoding: "utf8", env: { ...process.env, LC_LOCALE: "zh" } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /lc <命令>/);
 });
