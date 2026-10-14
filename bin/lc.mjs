@@ -449,10 +449,11 @@ export async function cmdList(opts, deps) {
   if (!Number.isInteger(limit) || limit <= 0) {
     throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
   }
-  if (!Number.isInteger(offset) || offset <= 0) {
-    throw new Error(`--offset 需为正整数，收到：${opts.flags.offset}`);
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error(`--offset 需为非负整数，收到：${opts.flags.offset}`);
   }
-  const args = { limit,offset };
+  const args = { limit };
+  if (offset > 0) args.offset = offset;
   if (opts.positionals[0]) args.searchKeywords = opts.positionals[0];
   const difficulty = normalizeDifficulty(opts.flags.difficulty);
   if (difficulty) args.difficulty = difficulty;

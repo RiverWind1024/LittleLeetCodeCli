@@ -830,6 +830,22 @@ test("cmdList 默认 limit 为 20", async () => {
   assert.equal(args.limit, 20);
 });
 
+test("cmdList --offset 5 时传入 offset", async () => {
+  let args;
+  await cmdList({ positionals: [], flags: { offset: "5" } }, {
+    cwd: "/tmp", session: "", out: () => {},
+    callTool: async (n, a) => { args = a; return { problems: { questions: [] } }; },
+  });
+  assert.equal(args.offset, 5);
+});
+
+test("cmdList --offset 非法时报错", async () => {
+  await assert.rejects(
+    cmdList({ positionals: [], flags: { offset: "abc" } }, { cwd: "/tmp", session: "", out: () => {}, callTool: async () => ({}) }),
+    /--offset 需为非负整数/
+  );
+});
+
 test("cmdList --limit 非法时报错，difficulty 大小写归一", async () => {
   await assert.rejects(
     cmdList({ positionals: [], flags: { limit: "abc" } }, { cwd: "/tmp", session: "", out: () => {}, callTool: async () => ({}) }),
