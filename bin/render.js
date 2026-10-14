@@ -1,9 +1,23 @@
 import { strWidth, isChineseEnv, style } from "./utils.js";
 
 const DIFFICULTY = {
-  EASY: { cn: "简单", color: "green" },
-  MEDIUM: { cn: "中等", color: "yellow" },
-  HARD: { cn: "困难", color: "red" },
+  EASY: { cn: "简单", en: "EASY", color: "green" },
+  MEDIUM: { cn: "中等", en: "MID", color: "yellow" },
+  HARD: { cn: "困难", en:"HARD", color: "red" },
+};
+
+const LIST_TABLE_HEADER_ZH = {
+  DIFFICULTY: "难度",
+  STATUS: "状态",
+  SLUG: "题号",
+  TITLE: "标题",
+};
+
+const LIST_TABLE_HEADER_EN = {
+  DIFFICULTY: "DIFFICULTY",
+  STATUS: "STATUS" ,
+  SLUG: "SLUG",
+  TITLE: "TITLE",
 };
 
 export function resolveTitle(q, zh) {
@@ -31,10 +45,12 @@ export function renderTable(header, rows, { style: st = style } = {}) {
 
 export function renderList(questions, { style: st = style, zh = isChineseEnv(), solved } = {}) {
   if (!questions || questions.length === 0) return "无匹配题目";
-  const header = solved ? ["难度", "状态", "标题", "slug"] : ["难度", "标题", "slug"];
+  let header_dict = zh ? LIST_TABLE_HEADER_ZH : LIST_TABLE_HEADER_EN
+  const header = solved ? [header_dict.DIFFICULTY, header_dict.STATUS, header_dict.TITLE, header_dict.SLUG] : [header_dict.DIFFICULTY, header_dict.TITLE, header_dict.SLUG];
   const rows = questions.map((q) => {
     const d = difficultyLabel(q.difficulty);
-    const cells = [{ plain: d.cn, styled: st[d.color](d.cn) }];
+    const d_tag = zh ? d.cn : d.en
+    const cells = [{ plain: d_tag, styled: st[d.color](d_tag) }];
     if (solved) {
       cells.push(solved.has(q.titleSlug)
         ? { plain: "✓", styled: st.green("✓") }
@@ -77,7 +93,7 @@ export function renderSolvedTable(solved, { style: st = style, zh = isChineseEnv
   return renderTable(header, table, { style: st });
 }
 
-export function difficultyLabel(difficulty) {
+export function difficultyLabel(difficulty,zh) {
   const key = String(difficulty ?? "").toUpperCase();
   if (DIFFICULTY[key]) return DIFFICULTY[key];
   return { cn: String(difficulty ?? "未知"), color: "dim" };

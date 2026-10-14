@@ -26,6 +26,7 @@ const COMMANDS = {
       ["--difficulty EASY|MEDIUM|HARD", "按难度筛选"],
       ["--tags a,b", "按标签筛选，逗号分隔"],
       ["--limit N", "返回条数，默认 20"],
+      ["--offset N", "偏移，默认 0"],
       ["--refresh", "强制重新抓取已解决状态缓存"],
     ],
   },
@@ -444,10 +445,14 @@ export async function cmdList(opts, deps) {
     warn = (s) => console.error(s), style: st = style, now,
   } = deps;
   const limit = Number(opts.flags.limit ?? 20);
+  const offset = Number(opts.flags.offset ?? 0);
   if (!Number.isInteger(limit) || limit <= 0) {
     throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
   }
-  const args = { limit };
+  if (!Number.isInteger(offset) || offset <= 0) {
+    throw new Error(`--offset 需为正整数，收到：${opts.flags.offset}`);
+  }
+  const args = { limit,offset };
   if (opts.positionals[0]) args.searchKeywords = opts.positionals[0];
   const difficulty = normalizeDifficulty(opts.flags.difficulty);
   if (difficulty) args.difficulty = difficulty;
