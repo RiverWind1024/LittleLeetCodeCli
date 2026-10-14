@@ -302,12 +302,25 @@ test("formatRandom 展示中文名/难度/标签/链接与 show 提示", () => {
   const out = formatRandom({
     title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum",
     difficulty: "EASY", topicTags: ["array", "hash-table"],
-  });
+  }, { zh: true });
   assert.match(out, /两数之和/);
   assert.match(out, /简单/);
   assert.match(out, /Array|array/);
   assert.match(out, /https:\/\/leetcode\.cn\/problems\/two-sum\//);
   assert.match(out, /lc show two-sum/);
+});
+
+test("formatRandom 英文模式展示英文标题与难度", () => {
+  const out = formatRandom({
+    title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum",
+    difficulty: "EASY", topicTags: ["array"],
+  }, { zh: false });
+  assert.match(out, /Random Problem/);
+  assert.match(out, /Two Sum/);
+  assert.match(out, /\[EASY\]/);
+  assert.doesNotMatch(out, /简单/);
+  assert.match(out, /两数之和/);
+  assert.ok(out.indexOf("Two Sum") < out.indexOf("两数之和"), "英文模式下英文标题应为主（排在前面）");
 });
 
 test("cmdRandom 先取 total 再按随机 offset 取一题", async () => {
@@ -316,7 +329,7 @@ test("cmdRandom 先取 total 再按随机 offset 取一题", async () => {
   await cmdRandom(
     { positionals: [], flags: { difficulty: "hard", tags: "array" } },
     {
-      cwd: tmp(), session: "", out: (s) => out.push(s), random: () => 0.5,
+      cwd: tmp(), session: "", out: (s) => out.push(s), random: () => 0.5, zh: true,
       callTool: async (name, args) => {
         calls.push({ name, args });
         if (args.offset === 0) return { problems: { total: 100, questions: [{ titleSlug: "first", difficulty: "HARD" }] } };
@@ -333,7 +346,7 @@ test("cmdRandom 先取 total 再按随机 offset 取一题", async () => {
 test("cmdRandom offset 为 0 时只调用一次", async () => {
   const calls = [];
   await cmdRandom({ positionals: [], flags: {} }, {
-    cwd: tmp(), session: "", out: () => {}, random: () => 0,
+    cwd: tmp(), session: "", out: () => {}, random: () => 0, zh: true,
     callTool: async (name, args) => { calls.push(args); return { problems: { total: 10, questions: [{ titleSlug: "first", difficulty: "EASY" }] } }; },
   });
   assert.equal(calls.length, 1);
@@ -342,7 +355,7 @@ test("cmdRandom offset 为 0 时只调用一次", async () => {
 test("cmdRandom 无匹配题目时报错", async () => {
   await assert.rejects(
     cmdRandom({ positionals: [], flags: {} }, {
-      cwd: tmp(), session: "", out: () => {},
+      cwd: tmp(), session: "", out: () => {}, zh: true,
       callTool: async () => ({ problems: { total: 0, questions: [] } }),
     }),
     /没有符合条件的题目/

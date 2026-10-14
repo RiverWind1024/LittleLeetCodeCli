@@ -492,12 +492,14 @@ export function normalizeDifficulty(v) {
   return d;
 }
 
-export function formatRandom(q, { style: st = style } = {}) {
+export function formatRandom(q, { style: st = style, zh = isChineseEnv() } = {}) {
   const diff = difficultyLabel(q.difficulty);
-  const primary = q.titleCn || q.title || q.titleSlug;
-  const lines = ["随机一题", ""];
-  lines.push(`  ${st.bold(primary)}  ${st[diff.color](`[${diff.cn}]`)}`);
-  if (q.titleCn && q.title && q.title !== q.titleCn) lines.push(`  ${st.dim(q.title)}`);
+  const label = zh ? diff.cn : diff.en;
+  const primary = zh ? (q.titleCn || q.title || q.titleSlug) : (q.title || q.titleCn || q.titleSlug);
+  const secondary = zh ? q.title : q.titleCn;
+  const lines = [zh ? "随机一题" : "Random Problem", ""];
+  lines.push(`  ${st.bold(primary)}  ${st[diff.color](`[${label}]`)}`);
+  if (secondary && secondary !== primary) lines.push(`  ${st.dim(secondary)}`);
   if (Array.isArray(q.topicTags) && q.topicTags.length) lines.push(`  ${st.dim(q.topicTags.join(" · "))}`);
   if (q.titleSlug) {
     lines.push(`  ${st.dim(`https://leetcode.cn/problems/${q.titleSlug}/`)}`);
@@ -528,7 +530,7 @@ export async function cmdRandom(opts, deps) {
   if (data && data.raw !== undefined) { out(String(data.raw)); return; }
   const question = data?.problems?.questions?.[0];
   if (!question) throw new Error("未取到题目，请稍后重试");
-  out(formatRandom(question, { style: st }));
+  out(formatRandom(question, { style: st, zh: deps.zh ?? isChineseEnv() }));
 }
 
 const TRANSLATED_QUERY =
