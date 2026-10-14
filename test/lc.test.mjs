@@ -828,6 +828,7 @@ test("cmdList 默认 limit 为 20", async () => {
     callTool: async (n, a) => { args = a; return { problems: { questions: [] } }; },
   });
   assert.equal(args.limit, 20);
+  assert.equal(args.offset, undefined);
 });
 
 test("cmdList --offset 5 时传入 offset", async () => {
