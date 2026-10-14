@@ -11,13 +11,16 @@ const LIST_TABLE_HEADER_ZH = {
   STATUS: "状态",
   SLUG: "题号",
   TITLE: "标题",
+  COUNT: "次数",
+  RECENT_SUBMIT: "最近提交",
 };
 
 const LIST_TABLE_HEADER_EN = {
   DIFFICULTY: "DIFFICULTY",
   STATUS: "STATUS" ,
   SLUG: "SLUG",
-  TITLE: "TITLE",
+  COUNT: "COUNT",
+  RECENT_SUBMIT: "RECENT_SUBMIT",
 };
 
 export function resolveTitle(q, zh) {
@@ -78,7 +81,8 @@ export function renderSolvedTable(solved, { style: st = style, zh = isChineseEnv
   if (difficulty) rows = rows.filter((s) => s.difficulty === difficulty);
   if (limit != null) rows = rows.slice(offset, offset + limit);
   if (!rows || rows.length === 0) return "暂无已解决题目";
-  const header = ["难度", "标题", "slug", "最近提交", "次数"];
+  let header_dict = zh ? LIST_TABLE_HEADER_ZH : LIST_TABLE_HEADER_EN
+  const header = [header_dict.DIFFICULTY, header_dict.TITLE, header_dict.SLUG, header_dict.RECENT_SUBMIT, header_dict.COUNT];
   const table = rows.map((s) => {
     const d = difficultyLabel(s.difficulty);
     const date = String(s.lastSubmittedAt ?? "").slice(0, 10);
