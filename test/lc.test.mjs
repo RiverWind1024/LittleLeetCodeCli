@@ -42,6 +42,7 @@ import {
   detectColor,
   createStyle,
   isChineseEnv,
+  resolveLocale,
   htmlToText,
 } from "../bin/utils.js";
 import {
@@ -83,9 +84,9 @@ const NORM = (slug, date, extra = {}) => {
   };
 };
 
-test("printHelp 打印命令列表", () => {
+test("printHelp 打印命令列表（中文）", () => {
   const lines = [];
-  printHelp((s) => lines.push(s));
+  printHelp((s) => lines.push(s), { zh: true });
   const text = lines.join("\n");
   for (const cmd of ["init", "config", "list", "random", "progress", "show", "run", "submit"]) {
     assert.match(text, new RegExp(cmd));
@@ -93,14 +94,26 @@ test("printHelp 打印命令列表", () => {
   assert.match(text, /lc <命令> --help/);
 });
 
+test("printHelp 英文模式", () => {
+  const lines = [];
+  printHelp((s) => lines.push(s), { zh: false });
+  const text = lines.join("\n");
+  assert.match(text, /Usage: lc <command>/);
+  assert.match(text, /Command help/);
+});
+
 test("printCommandHelp 已知命令返回 true 并含选项，未知返回 false", () => {
   const lines = [];
-  assert.equal(printCommandHelp("list", (s) => lines.push(s)), true);
+  assert.equal(printCommandHelp("list", (s) => lines.push(s), { zh: true }), true);
   const text = lines.join("\n");
   assert.match(text, /用法：lc list/);
   assert.match(text, /--difficulty/);
   assert.match(text, /--tags/);
   assert.match(text, /--limit/);
+  assert.equal(printCommandHelp("list", () => {}, { zh: false }), true);
+  const linesEn = [];
+  printCommandHelp("list", (s) => linesEn.push(s), { zh: false });
+  assert.match(linesEn.join("\n"), /Usage: lc list/);
   assert.equal(printCommandHelp("nope", () => {}), false);
 });
 
@@ -115,7 +128,7 @@ test("main: lc <命令> --help 打印该命令用法且不调用 MCP", async () 
   const out = [];
   let called = false;
   await main(["submit", "--help"], {
-    cwd: tmp(), out: (s) => out.push(s),
+    cwd: tmp(), out: (s) => out.push(s), zh: true,
     callTool: async () => { called = true; return {}; },
   });
   assert.match(out.join("\n"), /用法：lc submit/);
@@ -124,14 +137,14 @@ test("main: lc <命令> --help 打印该命令用法且不调用 MCP", async () 
 
 test("main: lc help <命令> 与 --help 等价", async () => {
   const out = [];
-  await main(["help", "random"], { cwd: tmp(), out: (s) => out.push(s) });
+  await main(["help", "random"], { cwd: tmp(), out: (s) => out.push(s), zh: true });
   assert.match(out.join("\n"), /用法：lc random/);
 });
 
 test("main: 帮助无需在项目根目录也能用", async () => {
   const notRoot = tmp();
   const out = [];
-  await main(["list", "--help"], { cwd: notRoot, out: (s) => out.push(s) });
+  await main(["list", "--help"], { cwd: notRoot, out: (s) => out.push(s), zh: true });
   assert.match(out.join("\n"), /用法：lc list/);
 });
 
@@ -196,6 +209,7 @@ test("loadEnv 合并 .env 且环境变量优先", () => {
   writeFileSync(join(cwd, ".env"), "LEETCODE_SESSION=from_file\n");
   assert.equal(loadEnv(cwd, { LEETCODE_SESSION: "from_env" }).session, "from_env");
   assert.equal(loadEnv(cwd, {}).session, "from_file");
+  assert.equal(loadEnv(cwd, { LC_LOCALE: "en" }).env.LC_LOCALE, "en");
 });
 
 test("setEnvVar 更新/追加键并保留注释", () => {
@@ -218,7 +232,7 @@ test("mask 遮蔽中间字符", () => {
   assert.equal(mask("short"), "*****");
 });
 
-test("renderList 渲染带边框表格、中文难度并处理空列表", () => {
+test("renderList 渲染带边框表格、英文表头与难度并处理空列表", () => {
   const out = renderList([
     { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" },
     { difficulty: "HARD", title: "Hard One", titleSlug: "hard-one" },
@@ -226,13 +240,15 @@ test("renderList 渲染带边框表格、中文难度并处理空列表", () => 
   const lines = out.split("\n");
   assert.match(lines[0], /^┌/);
   assert.match(lines[lines.length - 1], /┘$/);
-  assert.match(lines[1], /难度/);
-  assert.match(lines[1], /slug/);
-  assert.match(out, /简单/);
-  assert.match(out, /困难/);
+  assert.match(lines[1], /DIFFICULTY/);
+  assert.match(lines[1], /TITLE/);
+  assert.match(lines[1], /SLUG/);
+  assert.match(out, /EASY/);
+  assert.match(out, /HARD/);
   assert.match(out, /Two Sum/);
-  assert.doesNotMatch(out, /EASY|HARD/);
-  assert.equal(renderList([]), "无匹配题目");
+  assert.doesNotMatch(out, /难度|简单/);
+  assert.equal(renderList([], { zh: false }), "No matching problems");
+  assert.equal(renderList([], { zh: true }), "无匹配题目");
 });
 
 test("isChineseEnv 识别中文环境", () => {
@@ -242,6 +258,17 @@ test("isChineseEnv 识别中文环境", () => {
   assert.equal(isChineseEnv({ LC_ALL: "zh_CN" }), true);
   assert.equal(isChineseEnv({ LANG: "zh_CN.UTF-8", LC_ALL: "en_US.UTF-8" }), false);
   assert.equal(isChineseEnv({}), false);
+});
+
+test("resolveLocale: LC_LOCALE 优先于 LC_ALL/LANG，支持 zh/en/auto", () => {
+  assert.equal(resolveLocale({ LC_LOCALE: "en", LANG: "zh_CN.UTF-8" }), "en");
+  assert.equal(resolveLocale({ LC_LOCALE: "zh", LANG: "en_US.UTF-8" }), "zh");
+  assert.equal(resolveLocale({ LC_LOCALE: "EN" }), "en");
+  assert.equal(resolveLocale({ LC_LOCALE: "zh_CN" }), "zh");
+  assert.equal(resolveLocale({ LC_LOCALE: "auto", LANG: "zh_CN.UTF-8" }), "zh");
+  assert.equal(resolveLocale({ LC_LOCALE: "auto", LANG: "en_US.UTF-8" }), "en");
+  assert.equal(resolveLocale({ LC_LOCALE: "", LANG: "zh_CN.UTF-8" }), "zh");
+  assert.equal(resolveLocale({}), "en");
 });
 
 test("resolveTitle 按语言取标题并回退", () => {
@@ -268,12 +295,12 @@ test("renderList 标题按语言显示单列并回退", () => {
 test("renderList 提供 solved 集合时显示状态列，否则不显示", () => {
   const row = { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum" };
   const withSolved = renderList([row], { zh: false, solved: new Set(["two-sum"]) });
-  assert.match(withSolved, /状态/);
+  assert.match(withSolved, /STATUS/);
   assert.match(withSolved, /✓/);
   const unsolved = renderList([row], { zh: false, solved: new Set(["other"]) });
   assert.doesNotMatch(unsolved, /✓/);
   const without = renderList([row], { zh: false });
-  assert.doesNotMatch(without, /状态/);
+  assert.doesNotMatch(without, /STATUS/);
 });
 
 test("normalizeDifficulty 归一化并校验", () => {
@@ -287,12 +314,25 @@ test("formatRandom 展示中文名/难度/标签/链接与 show 提示", () => {
   const out = formatRandom({
     title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum",
     difficulty: "EASY", topicTags: ["array", "hash-table"],
-  });
+  }, { zh: true });
   assert.match(out, /两数之和/);
   assert.match(out, /简单/);
   assert.match(out, /Array|array/);
   assert.match(out, /https:\/\/leetcode\.cn\/problems\/two-sum\//);
   assert.match(out, /lc show two-sum/);
+});
+
+test("formatRandom 英文模式展示英文标题与难度", () => {
+  const out = formatRandom({
+    title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum",
+    difficulty: "EASY", topicTags: ["array"],
+  }, { zh: false });
+  assert.match(out, /Random Problem/);
+  assert.match(out, /Two Sum/);
+  assert.match(out, /\[EASY\]/);
+  assert.doesNotMatch(out, /简单/);
+  assert.match(out, /两数之和/);
+  assert.ok(out.indexOf("Two Sum") < out.indexOf("两数之和"), "英文模式下英文标题应为主（排在前面）");
 });
 
 test("cmdRandom 先取 total 再按随机 offset 取一题", async () => {
@@ -301,7 +341,7 @@ test("cmdRandom 先取 total 再按随机 offset 取一题", async () => {
   await cmdRandom(
     { positionals: [], flags: { difficulty: "hard", tags: "array" } },
     {
-      cwd: tmp(), session: "", out: (s) => out.push(s), random: () => 0.5,
+      cwd: tmp(), session: "", out: (s) => out.push(s), random: () => 0.5, zh: true,
       callTool: async (name, args) => {
         calls.push({ name, args });
         if (args.offset === 0) return { problems: { total: 100, questions: [{ titleSlug: "first", difficulty: "HARD" }] } };
@@ -318,7 +358,7 @@ test("cmdRandom 先取 total 再按随机 offset 取一题", async () => {
 test("cmdRandom offset 为 0 时只调用一次", async () => {
   const calls = [];
   await cmdRandom({ positionals: [], flags: {} }, {
-    cwd: tmp(), session: "", out: () => {}, random: () => 0,
+    cwd: tmp(), session: "", out: () => {}, random: () => 0, zh: true,
     callTool: async (name, args) => { calls.push(args); return { problems: { total: 10, questions: [{ titleSlug: "first", difficulty: "EASY" }] } }; },
   });
   assert.equal(calls.length, 1);
@@ -327,7 +367,7 @@ test("cmdRandom offset 为 0 时只调用一次", async () => {
 test("cmdRandom 无匹配题目时报错", async () => {
   await assert.rejects(
     cmdRandom({ positionals: [], flags: {} }, {
-      cwd: tmp(), session: "", out: () => {},
+      cwd: tmp(), session: "", out: () => {}, zh: true,
       callTool: async () => ({ problems: { total: 0, questions: [] } }),
     }),
     /没有符合条件的题目/
@@ -535,7 +575,7 @@ test("cmdConfig set/get/unset/list 操作 .env 并遮蔽输出", () => {
   cmdConfig({ positionals: ["unset", "session"] }, deps);
   assert.doesNotMatch(readFileSync(join(cwd, ".env"), "utf8"), /LEETCODE_SESSION/);
 
-  assert.throws(() => cmdConfig({ positionals: ["set", "bogus", "x"] }, deps), /lc config <get\|set\|unset\|list> \[session\|lang\]/);
+  assert.throws(() => cmdConfig({ positionals: ["set", "bogus", "x"] }, deps), /lc config <get\|set\|unset\|list> \[session\|lang\|locale\]/);
 });
 
 test("cmdConfig unset 未设置时提示且不报错", () => {
@@ -575,6 +615,37 @@ test("cmdConfig 同时保存 session 与 lang", () => {
   const lines = out.slice(-2);
   assert.match(lines[0], /^LEETCODE_SESSION=abcd\*\*\*\*ijkl$/);
   assert.match(lines[1], /^DEFAULT_LANG=golang$/);
+});
+
+test("cmdConfig locale: set/get/unset 与非法值", () => {
+  const cwd = tmp();
+  const out = [];
+  cmdConfig({ positionals: ["set", "locale", "en"] }, { cwd, out: (s) => out.push(s) });
+  assert.match(readFileSync(join(cwd, ".env"), "utf8"), /LC_LOCALE=en/);
+
+  const out2 = [];
+  cmdConfig({ positionals: ["get", "locale"] }, { cwd, out: (s) => out2.push(s) });
+  assert.equal(out2.join("\n"), "en");
+
+  // 从 .env 读回
+  assert.equal(loadEnv(cwd, {}).env.LC_LOCALE, "en");
+  // 进程环境变量优先于 .env
+  assert.equal(loadEnv(cwd, { LC_LOCALE: "zh" }).env.LC_LOCALE, "zh");
+
+  // auto + 空环境（无 LANG/LC_ALL）→ 英文（用受控 env 避免依赖宿主 LANG）
+  cmdConfig({ positionals: ["set", "locale", "auto"] }, { cwd, out: () => {} });
+  assert.equal(isChineseEnv(loadEnv(cwd, {}).env), false);
+
+  // auto + LANG=zh_CN.UTF-8 → 中文
+  assert.equal(isChineseEnv(loadEnv(cwd, { LANG: "zh_CN.UTF-8" }).env), true);
+
+  assert.throws(
+    () => cmdConfig({ positionals: ["set", "locale", "fr"] }, { cwd, out: () => {} }),
+    /不支持的语言地区：fr/
+  );
+
+  cmdConfig({ positionals: ["unset", "locale"] }, { cwd, out: () => {} });
+  assert.doesNotMatch(readFileSync(join(cwd, ".env"), "utf8"), /LC_LOCALE/);
 });
 
 test("readDefaultLang/chooseLang 解析默认语言，命令行优先", () => {
@@ -701,7 +772,8 @@ test("renderProgressSummary 统计已解决数量与难度分布", () => {
     PQ("b", "2026-01-02", { difficulty: "MEDIUM" }),
     PQ("c", "2026-01-03", { difficulty: "HARD" }),
   ];
-  assert.equal(renderProgressSummary(solved), "已解决 3 · 简单 1 · 中等 1 · 困难 1");
+  assert.equal(renderProgressSummary(solved, { zh: true }), "已解决 3 · 简单 1 · 中等 1 · 困难 1");
+  assert.equal(renderProgressSummary(solved, { zh: false }), "Solved 3 · EASY 1 · MID 1 · HARD 1");
 });
 
 test("renderSolvedTable 渲染难度/标题/slug/日期/次数并支持过滤与分页", () => {
@@ -712,11 +784,21 @@ test("renderSolvedTable 渲染难度/标题/slug/日期/次数并支持过滤与
   ];
   const all = renderSolvedTable(solved, { zh: true });
   assert.match(all, /难度/);
-  assert.match(all, /slug/);
+  assert.match(all, /标题/);
+  assert.match(all, /题号/);
   assert.match(all, /最近提交/);
   assert.match(all, /次数/);
   assert.match(all, /2026-02-10/);
   assert.doesNotMatch(all, /T08:00:00/);
+
+  const allEn = renderSolvedTable(solved, { zh: false });
+  assert.match(allEn, /DIFFICULTY/);
+  assert.match(allEn, /TITLE/);
+  assert.match(allEn, /SLUG/);
+  assert.match(allEn, /EASY/);
+  assert.match(allEn, /MID/);
+  assert.match(allEn, /HARD/);
+
   const filtered = renderSolvedTable(solved, { zh: true, difficulty: "MEDIUM" });
   assert.match(filtered, /b/);
   assert.doesNotMatch(filtered, /c/);
@@ -730,7 +812,7 @@ test("cmdProgress 需要登录，成功后输出统计与表格", async () => {
   const dir = fakeRoot();
   await assert.rejects(
     cmdProgress({ positionals: [], flags: {} }, {
-      cwd: dir, session: "", out: () => {}, warn: () => {},
+      cwd: dir, session: "", out: () => {}, warn: () => {}, zh: true,
       callTool: async () => { throw new Error("不应调用"); },
     }),
     /需要登录/
@@ -738,7 +820,7 @@ test("cmdProgress 需要登录，成功后输出统计与表格", async () => {
   const dir2 = fakeRoot();
   const out2 = [];
   await cmdProgress({ positionals: [], flags: {} }, {
-    cwd: dir2, session: "s", out: (s) => out2.push(s),
+    cwd: dir2, session: "s", out: (s) => out2.push(s), zh: true,
     callTool: async (name) => ({ questions: { totalNum: 2, questions: [PQ("a", "2026-01-01"), PQ("b", "2026-01-02", { difficulty: "HARD" })] } }),
   });
   assert.match(out2[0], /已解决 2 · 简单 1 · 中等 0 · 困难 1/);
@@ -753,7 +835,7 @@ test("cmdProgress 支持 --difficulty/--limit/--offset，stale 时告警", async
   writeFileSync(join(dir, ".lc-cache", "solved.json"),
     JSON.stringify({ fetchedAt: 0, solved: [NORM("a", "2026-01-01"), NORM("b", "2026-01-02", { difficulty: "HARD" })] }));
   await cmdProgress({ positionals: [], flags: { difficulty: "hard" } }, {
-    cwd: dir, session: "s", out: (s) => out.push(s), warn: (s) => warnings.push(s),
+    cwd: dir, session: "s", out: (s) => out.push(s), warn: (s) => warnings.push(s), zh: true,
     callTool: async () => { throw new Error("net down"); },
   });
   assert.equal(warnings.length, 1, "stale 应告警");
@@ -764,7 +846,7 @@ test("cmdProgress 支持 --difficulty/--limit/--offset，stale 时告警", async
   const out2 = [];
   const dir3 = fakeRoot();
   await cmdProgress({ positionals: [], flags: { limit: "1", offset: "1" } }, {
-    cwd: dir3, session: "s", out: (s) => out2.push(s),
+    cwd: dir3, session: "s", out: (s) => out2.push(s), zh: true,
     callTool: async () => ({ questions: { totalNum: 2, questions: [PQ("a", "2026-01-01"), PQ("b", "2026-01-02")] } }),
   });
   assert.match(out2.join("\n"), /a/);
@@ -802,6 +884,23 @@ test("cmdList 默认 limit 为 20", async () => {
     callTool: async (n, a) => { args = a; return { problems: { questions: [] } }; },
   });
   assert.equal(args.limit, 20);
+  assert.equal(args.offset, undefined);
+});
+
+test("cmdList --offset 5 时传入 offset", async () => {
+  let args;
+  await cmdList({ positionals: [], flags: { offset: "5" } }, {
+    cwd: "/tmp", session: "", out: () => {},
+    callTool: async (n, a) => { args = a; return { problems: { questions: [] } }; },
+  });
+  assert.equal(args.offset, 5);
+});
+
+test("cmdList --offset 非法时报错", async () => {
+  await assert.rejects(
+    cmdList({ positionals: [], flags: { offset: "abc" } }, { cwd: "/tmp", session: "", out: () => {}, callTool: async () => ({}) }),
+    /--offset 需为非负整数/
+  );
 });
 
 test("cmdList --limit 非法时报错，difficulty 大小写归一", async () => {
@@ -856,7 +955,7 @@ test("renderProblemHeader 生成注释头：标题+题面，空行也用注释�
 test("cmdShow 生成文件顶部写入题目注释（中文优先，在代码之前）", async () => {
   const cwd = tmp();
   await cmdShow({ positionals: ["two-sum"], flags: {} }, {
-    cwd, session: "", out: () => {},
+    cwd, session: "", out: () => {}, zh: true,
     fetchTranslated: async () => ({ title: "两数之和", content: "<p>给定一个整数数组。</p>" }),
     callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [{ langSlug: "python3", code: "class Solution:\n    pass" }] } }),
   });
@@ -1001,7 +1100,7 @@ test("cmdShow 优先展示中文标题与题面", async () => {
   await cmdShow(
     { positionals: ["two-sum"], flags: {} },
     {
-      cwd: tmp(), session: "", out: (s) => out.push(s),
+      cwd: tmp(), session: "", out: (s) => out.push(s), zh: true,
       fetchTranslated: async () => ({ title: "两数之和", content: "<p>给定一个整数数组。</p>" }),
       callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
     }
@@ -1017,7 +1116,7 @@ test("cmdShow 中文不可用时回退英文", async () => {
   await cmdShow(
     { positionals: ["two-sum"], flags: {} },
     {
-      cwd: tmp(), session: "", out: (s) => out.push(s),
+      cwd: tmp(), session: "", out: (s) => out.push(s), zh: true,
       fetchTranslated: async () => null,
       callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
     }
@@ -1025,6 +1124,24 @@ test("cmdShow 中文不可用时回退英文", async () => {
   const text = out.join("\n");
   assert.match(text, /Two Sum/);
   assert.match(text, /Given an array\./);
+});
+
+test("cmdShow 英文 locale 使用英文题面且不调用中文接口", async () => {
+  const out = [];
+  let calledFetch = false;
+  await cmdShow(
+    { positionals: ["two-sum"], flags: {} },
+    {
+      cwd: tmp(), session: "", out: (s) => out.push(s), zh: false,
+      fetchTranslated: async () => { calledFetch = true; return { title: "两数之和", content: "<p>给定一个整数数组。</p>" }; },
+      callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
+    }
+  );
+  assert.equal(calledFetch, false);
+  const text = out.join("\n");
+  assert.match(text, /Two Sum/);
+  assert.match(text, /Given an array\./);
+  assert.doesNotMatch(text, /两数之和/);
 });
 
 test("fetchTranslated 网络异常时返回 null，不抛错", async () => {
@@ -1154,6 +1271,7 @@ test("main 未登录时 list 仍可调用", async () => {
   await main(["list", "two"], {
     cwd,
     out: (s) => out.push(s),
+    zh: true,
     callTool: async (name) => { called = name; return { problems: { questions: [] } }; },
   });
   assert.equal(called, "search_problems");
@@ -1182,13 +1300,13 @@ test("CLI 经软链调用时仍能执行（npm link / 全局安装路径）", ()
   const dir = tmp();
   const link = join(dir, "lc-link");
   symlinkSync(fileURLToPath(new URL("../bin/lc.mjs", import.meta.url)), link);
-  const r = spawnSync(process.execPath, [link, "help"], { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" });
+  const r = spawnSync(process.execPath, [link, "help"], { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8", env: { ...process.env, LC_LOCALE: "zh" } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /lc <命令>/);
 });
 
 test("CLI 直接执行时打印帮助", () => {
-  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../bin/lc.mjs", import.meta.url)), "help"], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../bin/lc.mjs", import.meta.url)), "help"], { encoding: "utf8", env: { ...process.env, LC_LOCALE: "zh" } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /lc <命令>/);
 });

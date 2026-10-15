@@ -49,7 +49,7 @@ lc init              # 引导配置登录 Cookie
 lc list two-sum          # 搜题
 lc progress --limit 10   # 已解决统计与列表（需登录）
 lc random            # 随机抽一题（可加 --difficulty / --tags）
-lc show two-sum      # 下载题目并生成 solution.py（题面默认中文）
+lc show two-sum      # 下载题目并生成 solution.py（题面随 locale，中文环境为中文）
 lc run two-sum       # 用默认样例跑一遍
 lc submit two-sum    # 提交
 ```
@@ -81,6 +81,7 @@ lc config get session      # 查看（脱敏：abcd****wxyz）
 lc config unset session    # 移除
 lc config list             # 列出所有键（session 脱敏，其余明文）
 lc config set lang cpp     # 设置默认编程语言（不再每次传 --lang）
+lc config set locale en    # 设置显示语言（zh|en|auto，默认 auto 跟随系统）
 ```
 
 Cookie 存在项目根的 `.env`（已在 `.gitignore` 中）：
@@ -105,11 +106,11 @@ LEETCODE_SESSION=<值> lc submit two-sum
 | 命令 | 说明 |
 |---|---|
 | `init` | 安装 MCP 依赖；未配置 Cookie 时交互引导写入 |
-| `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（`session` 登录 Cookie、`lang` 默认语言） |
+| `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（`session` 登录 Cookie、`lang` 默认语言、`locale` 显示语言 zh/en/auto） |
 | `list [关键词]` | 搜索题目，输出带边框表格；登录后含已解决状态列 |
 | `random` | 随机抽取一题（只打印，不生成文件） |
 | `progress` | 已解决题目的统计与列表（需登录）；已解决列表缓存在 `.lc-cache/` |
-| `show <slug>` | 取题目、生成代码文件、打印中文题面 |
+| `show <slug>` | 取题目、生成代码文件、按 locale 打印中/英题面 |
 | `run <slug>` | 用题目默认样例运行本地代码 |
 | `submit <slug>` | 提交本地代码 |
 
@@ -172,13 +173,13 @@ solutions/
   遵循 `NO_COLOR`（设置即禁用）与 `FORCE_COLOR`（非 `0` 即强制启用）约定。
 - **难度配色**：简单=绿、中等=黄、困难=红；列宽按显示宽度计算，中文占 2 列。
 - **状态列**：登录后 `list` 每行显示状态列，已解决标绿色 ✅；未登录时不显示该列。
-- **标题语言**：`list` 按当前 locale 自动选中文/英文标题（`LC_ALL`/`LANG` 以 zh 开头即中文，`LC_ALL` 优先）。
+- **显示语言**：命令输出与帮助文本按 locale 自动中英切换；优先级 `lc config locale`（写入 `.env` 的 `LC_LOCALE`）> 系统 `LC_ALL`/`LANG`（以 `zh` 开头即中文）。`locale` 设为 `auto`（默认）时跟随系统。
 - **已解决缓存**：`progress` 与 `list` 把已解决列表缓存到 `.lc-cache/solved.json`（24 小时），
   刷新失败时静默降级用旧缓存并在 stderr 告警。
 - **判题结果**：输出摘要（状态 / 通过用例 / 耗时 / 内存 / 提交 ID / 详情链接），
   失败时直接给出首个失败用例的输入、期望与实际。判题未通过时退出码为 `1`。
-- **题面语言**：`show` 优先展示中文标题与题面（直连 leetcode.cn 公开接口，无需登录）；
-  取不到中文时自动回退英文。上标/下标会渲染为 `x_i^y_i` 这类纯文本，不丢数学语义。
+- **题面语言**：`show` 按 locale 展示中/英文标题与题面（中文取不到时回退英文），生成的文件注释同样随 locale；
+  上标/下标会渲染为 `x_i^y_i` 这类纯文本，不丢数学语义。
 - **文件题面注释**：`show` 生成的文件顶部带题目注释（标题 + 完整题面，按语言用 `#` / `//`）。
 - 退出码：成功 `0`，出错 `1`。
 
@@ -187,7 +188,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 97 个单元/集成测试（node:test）
+npm test           # 104 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。
