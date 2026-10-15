@@ -575,7 +575,7 @@ test("cmdConfig set/get/unset/list 操作 .env 并遮蔽输出", () => {
   cmdConfig({ positionals: ["unset", "session"] }, deps);
   assert.doesNotMatch(readFileSync(join(cwd, ".env"), "utf8"), /LEETCODE_SESSION/);
 
-  assert.throws(() => cmdConfig({ positionals: ["set", "bogus", "x"] }, deps), /lc config <get\|set\|unset\|list> \[session\|lang\]/);
+  assert.throws(() => cmdConfig({ positionals: ["set", "bogus", "x"] }, deps), /lc config <get\|set\|unset\|list> \[session\|lang\|locale\]/);
 });
 
 test("cmdConfig unset 未设置时提示且不报错", () => {
@@ -615,6 +615,37 @@ test("cmdConfig 同时保存 session 与 lang", () => {
   const lines = out.slice(-2);
   assert.match(lines[0], /^LEETCODE_SESSION=abcd\*\*\*\*ijkl$/);
   assert.match(lines[1], /^DEFAULT_LANG=golang$/);
+});
+
+test("cmdConfig locale: set/get/unset 与非法值", () => {
+  const cwd = tmp();
+  const out = [];
+  cmdConfig({ positionals: ["set", "locale", "en"] }, { cwd, out: (s) => out.push(s) });
+  assert.match(readFileSync(join(cwd, ".env"), "utf8"), /LC_LOCALE=en/);
+
+  const out2 = [];
+  cmdConfig({ positionals: ["get", "locale"] }, { cwd, out: (s) => out2.push(s) });
+  assert.equal(out2.join("\n"), "en");
+
+  // 从 .env 读回
+  assert.equal(loadEnv(cwd, {}).env.LC_LOCALE, "en");
+  // 进程环境变量优先于 .env
+  assert.equal(loadEnv(cwd, { LC_LOCALE: "zh" }).env.LC_LOCALE, "zh");
+
+  // auto + 空环境（无 LANG/LC_ALL）→ 英文（用受控 env 避免依赖宿主 LANG）
+  cmdConfig({ positionals: ["set", "locale", "auto"] }, { cwd, out: () => {} });
+  assert.equal(isChineseEnv(loadEnv(cwd, {}).env), false);
+
+  // auto + LANG=zh_CN.UTF-8 → 中文
+  assert.equal(isChineseEnv(loadEnv(cwd, { LANG: "zh_CN.UTF-8" }).env), true);
+
+  assert.throws(
+    () => cmdConfig({ positionals: ["set", "locale", "fr"] }, { cwd, out: () => {} }),
+    /不支持的语言地区：fr/
+  );
+
+  cmdConfig({ positionals: ["unset", "locale"] }, { cwd, out: () => {} });
+  assert.doesNotMatch(readFileSync(join(cwd, ".env"), "utf8"), /LC_LOCALE/);
 });
 
 test("readDefaultLang/chooseLang 解析默认语言，命令行优先", () => {

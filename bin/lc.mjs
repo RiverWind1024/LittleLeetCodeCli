@@ -369,16 +369,17 @@ const SESSION_KEY = "LEETCODE_SESSION";
 
 
 
-const CONFIG_USAGE = "用法：lc config <get|set|unset|list> [session|lang] [value]";
+const CONFIG_USAGE = "用法：lc config <get|set|unset|list> [session|lang|locale] [value]";
 
 const CONFIG_KEYS = {
   session: { envKey: SESSION_KEY, secret: true },
   lang: { envKey: DEFAULT_LANG_KEY, secret: false, validate: (v) => LANG_MAP[v] },
+  locale: { envKey: "LC_LOCALE", secret: false, validate: (v) => ["zh", "en", "auto"].includes(v) },
 };
 
 function resolveConfigKey(key) {
   const spec = CONFIG_KEYS[key];
-  if (!spec) throw new Error(`${CONFIG_USAGE}\n（lang 支持：${Object.keys(LANG_MAP).join(", ")}）`);
+  if (!spec) throw new Error(`${CONFIG_USAGE}\n（lang 支持：${Object.keys(LANG_MAP).join(", ")}；locale 支持：zh, en, auto）`);
   return spec;
 }
 
@@ -392,6 +393,9 @@ export function cmdConfig(opts, deps) {
     const spec = resolveConfigKey(key);
     if (!value) throw new Error(CONFIG_USAGE);
     if (spec.validate && !spec.validate(value)) {
+      if (key === "locale") {
+        throw new Error(`不支持的语言地区：${value}（支持：zh, en, auto）`);
+      }
       throw new Error(`不支持的语言：${value}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
     }
     writeEnv(envPath, setEnvVar(current, spec.envKey, value));
