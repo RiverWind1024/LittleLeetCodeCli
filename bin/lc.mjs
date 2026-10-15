@@ -589,6 +589,7 @@ export async function cmdShow(opts, deps) {
     callTool: call = callTool, cwd, session = "", out = console.log, style: st = style,
     fetchTranslated: fetchZh = fetchTranslated,
   } = deps;
+  const useZh = deps.zh ?? isChineseEnv();
   const slug = opts.positionals[0];
   if (!slug) throw new Error("用法：lc show <slug> [--lang L] [--force]");
   const lang = chooseLang(opts.flags, cwd);
@@ -603,16 +604,20 @@ export async function cmdShow(opts, deps) {
   }
   const path = resolveNewPath(cwd, slug, problem.questionId, lang);
 
-  const zh = await fetchZh(slug);
-  const zhTitle = zh?.title || problem.title || null;
-  const title = zhTitle || slug;
-  const body = htmlToText(zh?.content || problem.content || "");
+  const translated = useZh ? await fetchZh(slug) : null;
+  const headerTitle = useZh
+    ? (translated?.title || problem.title || null)
+    : (problem.title || translated?.title || null);
+  const title = headerTitle || slug;
+  const body = htmlToText(
+    (useZh ? (translated?.content || problem.content) : (problem.content || translated?.content)) || ""
+  );
 
   if (existsSync(path) && !opts.flags.force) {
     out(`${st.dim("已存在，跳过：")}${path}${st.dim("（--force 覆盖）")}`);
   } else {
     const snippet = (problem.codeSnippets ?? []).find((s) => s.langSlug === meta.langSlug);
-    const header = renderProblemHeader(zhTitle, body, meta.comment);
+    const header = renderProblemHeader(headerTitle, body, meta.comment);
     const code = header + (snippet ? `${snippet.code}\n` : `${meta.comment} TODO: implement\n`);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, code);
@@ -620,7 +625,7 @@ export async function cmdShow(opts, deps) {
   }
   const diff = difficultyLabel(problem.difficulty);
   out("");
-  out(`${st.bold(title)}  ${st[diff.color](`[${diff.cn}]`)}`);
+  out(`${st.bold(title)}  ${st[diff.color](`[${useZh ? diff.cn : diff.en}]`)}`);
   out(st.dim(`https://leetcode.cn/problems/${slug}/`));
   out("");
   out(body);

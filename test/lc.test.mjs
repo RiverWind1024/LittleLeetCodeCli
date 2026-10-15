@@ -924,7 +924,7 @@ test("renderProblemHeader 生成注释头：标题+题面，空行也用注释�
 test("cmdShow 生成文件顶部写入题目注释（中文优先，在代码之前）", async () => {
   const cwd = tmp();
   await cmdShow({ positionals: ["two-sum"], flags: {} }, {
-    cwd, session: "", out: () => {},
+    cwd, session: "", out: () => {}, zh: true,
     fetchTranslated: async () => ({ title: "两数之和", content: "<p>给定一个整数数组。</p>" }),
     callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [{ langSlug: "python3", code: "class Solution:\n    pass" }] } }),
   });
@@ -1069,7 +1069,7 @@ test("cmdShow 优先展示中文标题与题面", async () => {
   await cmdShow(
     { positionals: ["two-sum"], flags: {} },
     {
-      cwd: tmp(), session: "", out: (s) => out.push(s),
+      cwd: tmp(), session: "", out: (s) => out.push(s), zh: true,
       fetchTranslated: async () => ({ title: "两数之和", content: "<p>给定一个整数数组。</p>" }),
       callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
     }
@@ -1085,7 +1085,7 @@ test("cmdShow 中文不可用时回退英文", async () => {
   await cmdShow(
     { positionals: ["two-sum"], flags: {} },
     {
-      cwd: tmp(), session: "", out: (s) => out.push(s),
+      cwd: tmp(), session: "", out: (s) => out.push(s), zh: true,
       fetchTranslated: async () => null,
       callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
     }
@@ -1093,6 +1093,24 @@ test("cmdShow 中文不可用时回退英文", async () => {
   const text = out.join("\n");
   assert.match(text, /Two Sum/);
   assert.match(text, /Given an array\./);
+});
+
+test("cmdShow 英文 locale 使用英文题面且不调用中文接口", async () => {
+  const out = [];
+  let calledFetch = false;
+  await cmdShow(
+    { positionals: ["two-sum"], flags: {} },
+    {
+      cwd: tmp(), session: "", out: (s) => out.push(s), zh: false,
+      fetchTranslated: async () => { calledFetch = true; return { title: "两数之和", content: "<p>给定一个整数数组。</p>" }; },
+      callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
+    }
+  );
+  assert.equal(calledFetch, false);
+  const text = out.join("\n");
+  assert.match(text, /Two Sum/);
+  assert.match(text, /Given an array\./);
+  assert.doesNotMatch(text, /两数之和/);
 });
 
 test("fetchTranslated 网络异常时返回 null，不抛错", async () => {
