@@ -651,7 +651,7 @@ const meaningful = (v) =>
 
 function pickFailure(c) {
   if (c.last_testcase) {
-    return { input: c.last_testcase, expected: c.expected_output, actual: c.std_output ?? c.code_output };
+    return { input: c.last_testcase, expected: c.expected_output, actual: c.code_output };
   }
   const got = c.std_output_list;
   const exp = c.expected_std_output_list;
