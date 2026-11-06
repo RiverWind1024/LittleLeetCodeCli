@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lcGraphql, fetchSubmissionList } from "../bin/history.js";
+import { lcGraphql, fetchSubmissionList, fetchSubmissionStats } from "../bin/history.js";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -120,4 +120,52 @@ test("fetchSubmissionList 缺 submissions 时返回空数组", async () => {
   const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ data: {} }) });
   const list = await fetchSubmissionList("two-sum", { session: "T", fetchImpl: fakeFetch });
   assert.deepEqual(list, []);
+});
+
+test("fetchSubmissionStats 用别名一次查多条并返回 Map", async () => {
+  const captured = {};
+  const fakeFetch = async (url, init) => {
+    captured.body = JSON.parse(init.body);
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        data: {
+          s0: { id: "1", runtimePercentile: 51.66, memoryPercentile: 40.87, passedTestCaseCnt: 65, totalTestCaseCnt: 65 },
+          s1: { id: "2", runtimePercentile: 36.3, memoryPercentile: 58.44, passedTestCaseCnt: 64, totalTestCaseCnt: 65 },
+        },
+      }),
+    };
+  };
+  const stats = await fetchSubmissionStats(["1", "2"], { session: "T", fetchImpl: fakeFetch });
+  assert.ok(captured.body.query.includes('s0: submissionDetail(submissionId: "1")'));
+  assert.ok(captured.body.query.includes('s1: submissionDetail(submissionId: "2")'));
+  // 统计批次不选 code，避免响应体膨胀
+  assert.ok(!captured.body.query.includes("code"));
+  assert.equal(stats.size, 2);
+  // 顺序与入参一致
+  assert.deepEqual([...stats.keys()], ["1", "2"]);
+  assert.equal(stats.get("1").runtimePercentile, 51.66);
+  assert.equal(stats.get("1").memoryPercentile, 40.87);
+  assert.equal(stats.get("1").passedTestCaseCnt, 65);
+  assert.equal(stats.get("1").totalTestCaseCnt, 65);
+  assert.equal(stats.get("2").runtimePercentile, 36.3);
+});
+
+test("fetchSubmissionStats 跳过无效 id 的 null 结果", async () => {
+  const fakeFetch = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ data: { s0: null, s1: { id: "2", runtimePercentile: 10 } } }),
+  });
+  const stats = await fetchSubmissionStats(["1", "2"], { session: "T", fetchImpl: fakeFetch });
+  assert.equal(stats.size, 1);
+  assert.ok(stats.has("2"));
+  assert.ok(!stats.has("1"));
+});
+
+test("fetchSubmissionStats 空 id 列表不发请求", async () => {
+  let called = false;
+  const fakeFetch = async () => { called = true; return { ok: true, status: 200, json: async () => ({ data: {} }) }; };
+  const stats = await fetchSubmissionStats([], { session: "T", fetchImpl: fakeFetch });
+  assert.equal(called, false);
+  assert.equal(stats.size, 0);
 });

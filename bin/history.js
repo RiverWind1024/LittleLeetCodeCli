@@ -79,3 +79,30 @@ export async function fetchSubmissionList(
     isPending: s?.isPending ?? "",
   }));
 }
+
+const STATS_FIELDS = `id
+      runtimePercentile
+      memoryPercentile
+      passedTestCaseCnt
+      totalTestCaseCnt`;
+
+export async function fetchSubmissionStats(ids, { session = "", fetchImpl = fetch, timeoutMs = 20000 } = {}) {
+  const list = (ids ?? []).map((v) => String(v ?? "")).filter(Boolean);
+  const stats = new Map();
+  if (list.length === 0) return stats;
+  const query = `query {\n${list
+    .map((id, i) => `  s${i}: submissionDetail(submissionId: ${JSON.stringify(id)}) { ${STATS_FIELDS} }`)
+    .join("\n")}\n}`;
+  const data = await lcGraphql(query, {}, { fetchImpl, session, timeoutMs });
+  list.forEach((id, i) => {
+    const d = data?.[`s${i}`];
+    if (!d) return;
+    stats.set(id, {
+      runtimePercentile: typeof d.runtimePercentile === "number" ? d.runtimePercentile : null,
+      memoryPercentile: typeof d.memoryPercentile === "number" ? d.memoryPercentile : null,
+      passedTestCaseCnt: d.passedTestCaseCnt ?? null,
+      totalTestCaseCnt: d.totalTestCaseCnt ?? null,
+    });
+  });
+  return stats;
+}
