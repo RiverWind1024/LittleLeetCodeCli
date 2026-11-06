@@ -33,3 +33,49 @@ export async function lcGraphql(query, variables, { fetchImpl = fetch, session =
   if (!json?.data) throw new Error("获取提交历史失败：接口未返回预期数据");
   return json.data;
 }
+
+const SUBMISSION_LIST_QUERY = `query submissionList($offset: Int!, $limit: Int!, $questionSlug: String) {
+  submissionList(offset: $offset, limit: $limit, questionSlug: $questionSlug) {
+    hasNext
+    submissions {
+      id
+      title
+      status
+      statusDisplay
+      lang
+      langName: langVerboseName
+      runtime
+      memory
+      timestamp
+      frontendId
+      url
+      isPending
+    }
+  }
+}`;
+
+export async function fetchSubmissionList(
+  slug,
+  { session = "", offset = 0, limit = 20, fetchImpl = fetch, timeoutMs = 20000 } = {},
+) {
+  const data = await lcGraphql(
+    SUBMISSION_LIST_QUERY,
+    { offset, limit, questionSlug: slug },
+    { fetchImpl, session, timeoutMs },
+  );
+  const subs = data?.submissionList?.submissions ?? [];
+  return subs.map((s) => ({
+    id: String(s?.id ?? ""),
+    title: s?.title ?? "",
+    status: s?.status ?? "",
+    statusDisplay: s?.statusDisplay ?? "",
+    lang: s?.lang ?? "",
+    langName: s?.langName ?? s?.lang ?? "",
+    runtime: s?.runtime ?? "",
+    memory: s?.memory ?? "",
+    timestamp: s?.timestamp ?? "",
+    frontendId: s?.frontendId ?? "",
+    url: s?.url ?? "",
+    isPending: s?.isPending ?? "",
+  }));
+}

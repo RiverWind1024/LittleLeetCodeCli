@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lcGraphql } from "../bin/history.js";
+import { lcGraphql, fetchSubmissionList } from "../bin/history.js";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -64,4 +64,60 @@ test("lcGraphql 缺少 data 字段时抛错", async () => {
     () => lcGraphql("query { x }", {}, { fetchImpl: fakeFetch, session: "T" }),
     /获取提交历史失败.*未返回预期数据/,
   );
+});
+
+test("fetchSubmissionList 按 slug 查询并归一化字段", async () => {
+  const captured = {};
+  const fakeFetch = async (url, init) => {
+    captured.body = JSON.parse(init.body);
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        data: {
+          submissionList: {
+            hasNext: true,
+            submissions: [{
+              id: "754578653",
+              title: "两数之和",
+              status: "AC",
+              statusDisplay: "Accepted",
+              lang: "python3",
+              langName: "Python3",
+              runtime: "3 ms",
+              memory: "20.3 MB",
+              timestamp: "1791886149",
+              frontendId: "19",
+              url: "/problems/two-sum/submissions/754578653",
+              isPending: "Not Pending",
+            }],
+          },
+        },
+      }),
+    };
+  };
+  const list = await fetchSubmissionList("two-sum", { session: "T", offset: 20, limit: 10, fetchImpl: fakeFetch });
+  assert.equal(captured.body.variables.questionSlug, "two-sum");
+  assert.equal(captured.body.variables.offset, 20);
+  assert.equal(captured.body.variables.limit, 10);
+  assert.ok(captured.body.query.includes("submissionList"));
+  assert.ok(captured.body.query.includes("questionSlug"));
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, "754578653");
+  assert.equal(list[0].title, "两数之和");
+  assert.equal(list[0].status, "AC");
+  assert.equal(list[0].statusDisplay, "Accepted");
+  assert.equal(list[0].lang, "python3");
+  assert.equal(list[0].langName, "Python3");
+  assert.equal(list[0].runtime, "3 ms");
+  assert.equal(list[0].memory, "20.3 MB");
+  assert.equal(list[0].timestamp, "1791886149");
+  assert.equal(list[0].frontendId, "19");
+  assert.equal(list[0].url, "/problems/two-sum/submissions/754578653");
+  assert.equal(list[0].isPending, "Not Pending");
+});
+
+test("fetchSubmissionList 缺 submissions 时返回空数组", async () => {
+  const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ data: {} }) });
+  const list = await fetchSubmissionList("two-sum", { session: "T", fetchImpl: fakeFetch });
+  assert.deepEqual(list, []);
 });
