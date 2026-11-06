@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, chmodSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,14 +6,19 @@ import {
   htmlToText, strWidth, isChineseEnv, style, parseEnvContent, loadEnv, setEnvVar, unsetEnvVar, writeEnv,
 } from "./utils.js";
 import { renderProgressSummary, renderSolvedTable,renderList,renderHistoryTable,renderSubmissionDetail,difficultyLabel } from "./render.js";
-import { fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "./history.js";
+import {
+  callTool, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail,
+} from "./api.js";
+
+// 保留旧的导出路径：CLI 内部与测试都从这里取 callTool
+export { callTool };
 
 const PICK = (v, zh) => (zh ? v.zh : v.en);
 
 const COMMANDS = {
   init: {
     usage: "lc init",
-    desc: { zh: "初始化：安装 MCP 依赖并配置 Cookie（幂等）", en: "Initialize: install MCP deps and configure Cookie (idempotent)" },
+    desc: { zh: "初始化：配置 Cookie（幂等）", en: "Initialize: configure Cookie (idempotent)" },
     options: [],
   },
   config: {
@@ -305,75 +309,6 @@ export async function cmdProgress(opts, deps) {
 
 
 
-export function resolveMcpBin(cwd) {
-  const local = join(cwd, "node_modules", ".bin", "leetcode-mcp-server");
-  if (existsSync(local)) return { cmd: local, args: [], local: true };
-  return { cmd: "npx", args: ["-y", "@jinzcdev/leetcode-mcp-server"], local: false };
-}
-
-export function callTool(name, toolArgs, opts = {}) {
-  const {
-    session = "",
-    cwd = process.cwd(),
-    timeoutMs = 120000,
-    resolveBin = resolveMcpBin,
-  } = opts;
-
-  return new Promise((resolve, reject) => {
-    const resolved = resolveBin(cwd);
-    const { cmd, args } = resolved;
-    if (resolved.local === false) {
-      process.stderr.write("提示：未找到本地 MCP server，回退使用 npx（可运行 lc init 安装到本地）。\n");
-    }
-    const env = { ...process.env };
-    if (session) env.LEETCODE_SESSION = session;
-
-    const child = spawn(cmd, [...args, "--site", "cn"], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
-    let buf = "";
-    let stderr = "";
-    let settled = false;
-
-    const timer = setTimeout(() => finish(new Error(`MCP 调用超时（${timeoutMs}ms）`)), timeoutMs);
-
-    function finish(err, data) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { child.stdin.end(); } catch { /* ignore */ }
-      child.kill();
-      if (err) reject(err); else resolve(data);
-    }
-
-    child.on("error", (e) => finish(new Error(`无法启动 MCP server：${e.message}`)));
-    child.stdin.on("error", () => { /* 写端提前关闭：交由 exit/超时 处理 */ });
-    child.on("exit", (code) => {
-      if (!settled) finish(new Error(`MCP server 提前退出（code ${code}）\n${stderr.trim()}`));
-    });
-    child.stderr.on("data", (d) => { stderr += d.toString(); });
-    child.stdout.on("data", (d) => {
-      buf += d.toString();
-      let nl;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let msg;
-        try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.id !== 2) continue;
-        if (msg.error) return finish(new Error(msg.error.message ?? "MCP 调用失败"));
-        const text = msg.result?.content?.[0]?.text ?? "";
-        let data;
-        try { data = JSON.parse(text); } catch { data = { raw: text }; }
-        return finish(null, data);
-      }
-    });
-
-    const send = (o) => child.stdin.write(JSON.stringify(o) + "\n");
-    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "lc", version: "1.0.0" } } });
-    send({ jsonrpc: "2.0", method: "notifications/initialized" });
-    send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name, arguments: toolArgs } });
-  });
-}
 
 const SESSION_KEY = "LEETCODE_SESSION";
 
@@ -440,16 +375,9 @@ async function promptCookieInteractive() {
 }
 
 export async function cmdInit(opts, deps) {
-  const { cwd, out = console.log, exec = spawnSync, promptCookie = promptCookieInteractive, env = process.env } = deps;
-  const bin = join(cwd, "node_modules", ".bin", "leetcode-mcp-server");
+  const { cwd, out = console.log, promptCookie = promptCookieInteractive, env = process.env } = deps;
 
-  if (!existsSync(bin)) {
-    out("未检测到本地 MCP server，正在安装依赖…");
-    const r = exec("npm", ["install"], { cwd, stdio: "inherit" });
-    if (r.status !== 0) throw new Error("npm install 失败，请手动运行 npm install");
-  } else {
-    out("MCP server 依赖已就绪。");
-  }
+  out("零依赖，无需安装任何依赖包。");
 
   const { session } = loadEnv(cwd, env);
   if (session) {
@@ -490,7 +418,6 @@ export async function cmdList(opts, deps) {
     args.tags = String(opts.flags.tags).split(",").map((s) => s.trim()).filter(Boolean);
   }
   const data = await call("search_problems", args, { session, cwd });
-  if (data && data.raw !== undefined) { out(String(data.raw)); return; }
   const questions = data?.problems?.questions ?? [];
 
   let solved;
@@ -550,41 +477,14 @@ export async function cmdRandom(opts, deps) {
   }
 
   const first = await call("search_problems", { ...args, limit: 1, offset: 0 }, { session, cwd });
-  if (first && first.raw !== undefined) { out(String(first.raw)); return; }
   const total = first?.problems?.total ?? 0;
   if (total <= 0) throw new Error("没有符合条件的题目");
 
   const offset = Math.min(Math.floor(random() * total), total - 1);
   const data = offset === 0 ? first : await call("search_problems", { ...args, limit: 1, offset }, { session, cwd });
-  if (data && data.raw !== undefined) { out(String(data.raw)); return; }
   const question = data?.problems?.questions?.[0];
   if (!question) throw new Error("未取到题目，请稍后重试");
   out(formatRandom(question, { style: st, zh: deps.zh ?? isChineseEnv() }));
-}
-
-const TRANSLATED_QUERY =
-  "query($t:String!){question(titleSlug:$t){translatedTitle translatedContent}}";
-
-// MCP 的 get_problem 只返回英文 content；这里直连 leetcode.cn 公开 GraphQL 取中文题面。
-// 任何失败都静默回退（返回 null），不影响 show 主体流程。
-export async function fetchTranslated(slug, { fetchImpl = fetch, timeoutMs = 8000 } = {}) {
-  try {
-    const res = await fetchImpl("https://leetcode.cn/graphql/", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        referer: `https://leetcode.cn/problems/${slug}/`,
-      },
-      body: JSON.stringify({ query: TRANSLATED_QUERY, variables: { t: slug } }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res || !res.ok) return null;
-    const q = (await res.json())?.data?.question;
-    if (!q) return null;
-    return { title: q.translatedTitle || null, content: q.translatedContent || null };
-  } catch {
-    return null;
-  }
 }
 
 export function renderProblemHeader(title, text, comment) {
@@ -601,7 +501,6 @@ export function renderProblemHeader(title, text, comment) {
 export async function cmdShow(opts, deps) {
   const {
     callTool: call = callTool, cwd, session = "", out = console.log, style: st = style,
-    fetchTranslated: fetchZh = fetchTranslated,
   } = deps;
   const useZh = deps.zh ?? isChineseEnv();
   const slug = opts.positionals[0];
@@ -611,20 +510,19 @@ export async function cmdShow(opts, deps) {
   if (!meta) throw new Error(`不支持的语言：${lang}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
 
   const data = await call("get_problem", { titleSlug: slug }, { session, cwd });
-  if (data && data.raw !== undefined) { out(String(data.raw)); return; }
   const problem = data?.problem ?? data;
   if (problem.questionId === undefined || problem.questionId === null) {
     throw new Error("get_problem 未返回 questionId，无法生成目录名");
   }
   const path = resolveNewPath(cwd, slug, problem.questionId, lang);
 
-  const translated = useZh ? await fetchZh(slug) : null;
+  // 直连 GraphQL 一次就同时拿到中英双语题面，无需再单独请求中文翻译
   const headerTitle = useZh
-    ? (translated?.title || problem.title || null)
-    : (problem.title || translated?.title || null);
+    ? (problem.translatedTitle || problem.title || null)
+    : (problem.title || problem.translatedTitle || null);
   const title = headerTitle || slug;
   const body = htmlToText(
-    (useZh ? (translated?.content || problem.content) : (problem.content || translated?.content)) || ""
+    (useZh ? (problem.translatedContent || problem.content) : (problem.content || problem.translatedContent)) || ""
   );
 
   if (existsSync(path) && !opts.flags.force) {
@@ -646,7 +544,6 @@ export async function cmdShow(opts, deps) {
 }
 
 function emit(out, data, st, setExitCode = (n) => { process.exitCode = n; }) {
-  if (data && typeof data === "object" && data.raw !== undefined) { out(String(data.raw)); return; }
   out(formatVerdict(data, { style: st }));
   if (!verdictOk(data)) setExitCode(1);
 }
@@ -870,7 +767,6 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     out: (s = "") => console.log(s),
     errOut: (s = "") => console.error(s),
     callTool,
-    exec: spawnSync,
     promptCookie: promptCookieInteractive,
     ...deps,
   };
