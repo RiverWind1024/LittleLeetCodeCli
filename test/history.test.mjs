@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
-import { submissionStatusLabel, formatTimestamp } from "../bin/render.js";
+import { submissionStatusLabel, formatTimestamp, renderHistoryTable } from "../bin/render.js";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -248,4 +248,59 @@ test("formatTimestamp 秒级时间戳转本地时间", () => {
 test("formatTimestamp 非法值原样返回", () => {
   assert.equal(formatTimestamp(""), "");
   assert.equal(formatTimestamp("abc"), "abc");
+});
+
+const HISTORY_ROW = {
+  id: "754578653",
+  title: "两数之和",
+  status: "AC",
+  statusDisplay: "Accepted",
+  lang: "python3",
+  langName: "Python3",
+  runtime: "3 ms",
+  memory: "20.3 MB",
+  timestamp: "1791886149",
+  runtimePercentile: 51.66,
+  memoryPercentile: 40.87,
+  passedTestCaseCnt: 65,
+  totalTestCaseCnt: 65,
+};
+
+test("renderHistoryTable 中文表头与内容", () => {
+  const out = renderHistoryTable([HISTORY_ROW], { zh: true });
+  for (const h of ["提交时间", "状态", "语言", "耗时", "内存", "击败%", "用例", "ID"]) {
+    assert.ok(out.includes(h), `缺少表头 ${h}`);
+  }
+  assert.ok(out.includes("通过"));
+  assert.ok(out.includes("Python3"));
+  assert.ok(out.includes("3 ms"));
+  assert.ok(out.includes("20.3 MB"));
+  assert.ok(out.includes("51.7%"));
+  assert.ok(out.includes("65/65"));
+  assert.ok(out.includes("754578653"));
+});
+
+test("renderHistoryTable 英文表头", () => {
+  const out = renderHistoryTable([HISTORY_ROW], { zh: false });
+  for (const h of ["TIME", "STATUS", "LANG", "RUNTIME", "MEMORY", "BEAT %", "CASES", "ID"]) {
+    assert.ok(out.includes(h), `缺少表头 ${h}`);
+  }
+  assert.ok(out.includes("Accepted"));
+});
+
+test("renderHistoryTable 击败%为 0 时显示占位符", () => {
+  const out = renderHistoryTable([{ ...HISTORY_ROW, runtimePercentile: 0 }], { zh: true });
+  assert.ok(out.includes("—"));
+  assert.ok(!out.includes("0.0%"));
+});
+
+test("renderHistoryTable 缺失统计字段时显示占位符", () => {
+  const out = renderHistoryTable([{ id: "1", status: "RE", timestamp: "1791886149" }], { zh: true });
+  assert.ok(out.includes("—"));
+  assert.ok(out.includes("运行错误"));
+});
+
+test("renderHistoryTable 空列表返回空状态文案", () => {
+  assert.equal(renderHistoryTable([], { zh: true }), "暂无提交记录");
+  assert.equal(renderHistoryTable([], { zh: false }), "No submissions");
 });

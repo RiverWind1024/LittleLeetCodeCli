@@ -132,3 +132,61 @@ export function formatTimestamp(ts) {
   const p = (v) => String(v).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
+
+const HISTORY_HEADER_ZH = {
+  TIME: "提交时间", STATUS: "状态", LANG: "语言", RUNTIME: "耗时",
+  MEMORY: "内存", BEAT: "击败%", CASES: "用例", ID: "ID",
+};
+
+const HISTORY_HEADER_EN = {
+  TIME: "TIME", STATUS: "STATUS", LANG: "LANG", RUNTIME: "RUNTIME",
+  MEMORY: "MEMORY", BEAT: "BEAT %", CASES: "CASES", ID: "ID",
+};
+
+const DASH = "—";
+
+// 击败百分位：0 表示该次提交没有有效百分位（如编译/运行错误），显示占位符
+function percentileText(v) {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return DASH;
+  return `${v.toFixed(1)}%`;
+}
+
+function casesText(passed, total) {
+  if (typeof passed !== "number" || typeof total !== "number") return DASH;
+  return `${passed}/${total}`;
+}
+
+export function renderHistoryTable(submissions, { style: st = style, zh = isChineseEnv() } = {}) {
+  if (!submissions || submissions.length === 0) return zh ? "暂无提交记录" : "No submissions";
+  const h = zh ? HISTORY_HEADER_ZH : HISTORY_HEADER_EN;
+  const header = [h.TIME, h.STATUS, h.LANG, h.RUNTIME, h.MEMORY, h.BEAT, h.CASES, h.ID];
+  const rows = submissions.map((s) => {
+    const key = String(s?.status ?? "").toUpperCase();
+    const known = SUBMISSION_STATUS[key];
+    let statusCell;
+    if (!known) {
+      statusCell = { plain: s?.status ?? "", styled: st.dim(s?.status ?? "") };
+    } else {
+      const text = zh ? known.cn : known.en;
+      const mark = key === "AC" ? "✓" : "✗";
+      const color = key === "AC" ? "green" : known.color;
+      const plain = `${mark} ${text}`;
+      statusCell = { plain, styled: st[color](plain) };
+    }
+    const time = formatTimestamp(s?.timestamp);
+    const beat = percentileText(s?.runtimePercentile);
+    const cases = casesText(s?.passedTestCaseCnt, s?.totalTestCaseCnt);
+    const langName = s?.langName || s?.lang || "";
+    return [
+      { plain: time, styled: st.dim(time) },
+      statusCell,
+      { plain: langName, styled: langName },
+      { plain: s?.runtime || DASH, styled: s?.runtime || DASH },
+      { plain: s?.memory || DASH, styled: s?.memory || DASH },
+      { plain: beat, styled: beat },
+      { plain: cases, styled: cases },
+      { plain: s?.id ?? "", styled: st.dim(s?.id ?? "") },
+    ];
+  });
+  return renderTable(header, rows, { style: st });
+}
