@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import {
   htmlToText, strWidth, isChineseEnv, style, parseEnvContent, loadEnv, setEnvVar, unsetEnvVar, writeEnv,
 } from "./utils.js";
-import { renderProgressSummary, renderSolvedTable,renderList,difficultyLabel } from "./render.js";
+import { renderProgressSummary, renderSolvedTable,renderList,renderHistoryTable,renderSubmissionDetail,difficultyLabel } from "./render.js";
+import { fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "./history.js";
 
 const PICK = (v, zh) => (zh ? v.zh : v.en);
 
@@ -73,6 +74,15 @@ const COMMANDS = {
     options: [
       ["--lang L", { zh: "目标语言，默认取 lc config lang，未设置则 python3", en: "Target language; default from lc config lang, else python3" }],
       ["--timeout ms", { zh: "超时，默认 120000", en: "Timeout, default 120000" }],
+    ],
+  },
+  history: {
+    usage: "lc history <slug> [选项]",
+    desc: { zh: "查看某题的历史提交记录与得分", en: "Show submission history and results for a problem" },
+    options: [
+      ["--limit N", { zh: "每页条数，默认 20，上限 100", en: "Rows per page, default 20, max 100" }],
+      ["--offset N", { zh: "跳过前 N 条，默认 0", en: "Skip the first N rows, default 0" }],
+      ["--id <提交ID>", { zh: "查看单次提交的完整详情（含源码）", en: "Show full detail of one submission (with source code)" }],
     ],
   },
 };
@@ -791,6 +801,51 @@ export async function cmdSubmit(opts, deps) {
     timeoutMs,
   }, { session, cwd, timeoutMs: timeoutMs + 5000 });
   emit(out, data, st, setExitCode);
+}
+
+export async function cmdHistory(opts, deps) {
+  const {
+    fetchImpl = fetch, session = "", out = console.log,
+    warn = (s) => console.error(s), style: st = style,
+  } = deps;
+  const slug = opts.positionals[0];
+  if (!slug) throw new Error("用法：lc history <slug> [--limit N] [--offset N] [--id <提交ID>]");
+  requireSession(session);
+  const zh = deps.zh ?? isChineseEnv();
+
+  if (opts.flags.id !== undefined) {
+    const id = String(opts.flags.id);
+    if (!/^\d+$/.test(id)) throw new Error(`--id 需为数字提交 ID，收到：${opts.flags.id}`);
+    const detail = await fetchSubmissionDetail(id, { session, fetchImpl });
+    if (!detail) throw new Error(`未找到提交 ${id}`);
+    out(renderSubmissionDetail(detail, { style: st, zh }));
+    return;
+  }
+
+  const limit = Number(opts.flags.limit ?? 20);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
+  }
+  if (limit > 100) throw new Error(`--limit 不能超过 100，收到：${opts.flags.limit}`);
+  const offset = Number(opts.flags.offset ?? 0);
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error(`--offset 需为非负整数，收到：${opts.flags.offset}`);
+  }
+
+  const list = await fetchSubmissionList(slug, { session, offset, limit, fetchImpl });
+  const stats = list.length
+    ? await fetchSubmissionStats(list.map((s) => s.id), { session, fetchImpl })
+    : new Map();
+  const rows = list.map((s) => ({ ...s, ...(stats.get(s.id) ?? {}) }));
+
+  if (rows.length === 0) {
+    out(zh ? `未查到 ${slug} 的提交记录。` : `No submissions found for ${slug}.`);
+    warn(zh
+      ? "提示：若你确定提交过，可能是 Cookie 已过期，请重新执行 lc config set session <cookie>。"
+      : "Hint: if you have submitted before, the cookie may have expired; run lc config set session <cookie>.");
+    return;
+  }
+  out(renderHistoryTable(rows, { style: st, zh }));
 }
 
 const PROJECT_NAME = "little-leetcode-cli";

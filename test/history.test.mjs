@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
 import { submissionStatusLabel, formatTimestamp, renderHistoryTable, renderSubmissionDetail } from "../bin/render.js";
+import { cmdHistory } from "../bin/lc.mjs";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -370,4 +371,136 @@ test("renderSubmissionDetail 英文模式使用英文标签", () => {
   const out = renderSubmissionDetail(DETAIL_FIXTURE, { zh: false });
   assert.ok(out.includes("Code"));
   assert.ok(out.includes("Language"));
+});
+
+test("cmdHistory 缺 slug 报用法", async () => {
+  await assert.rejects(
+    () => cmdHistory({ positionals: [], flags: {} }, { cwd: "/tmp", session: "T" }),
+    /用法：lc history <slug>/,
+  );
+});
+
+test("cmdHistory 未登录时报需要登录", async () => {
+  await assert.rejects(
+    () => cmdHistory({ positionals: ["two-sum"], flags: {} }, { cwd: "/tmp", session: "" }),
+    /该操作需要登录/,
+  );
+});
+
+test("cmdHistory 校验 limit 与 offset", async () => {
+  const deps = { cwd: "/tmp", session: "T" };
+  await assert.rejects(
+    () => cmdHistory({ positionals: ["two-sum"], flags: { limit: "0" } }, deps),
+    /--limit 需为正整数/,
+  );
+  await assert.rejects(
+    () => cmdHistory({ positionals: ["two-sum"], flags: { limit: "abc" } }, deps),
+    /--limit 需为正整数/,
+  );
+  await assert.rejects(
+    () => cmdHistory({ positionals: ["two-sum"], flags: { limit: "101" } }, deps),
+    /--limit 不能超过 100/,
+  );
+  await assert.rejects(
+    () => cmdHistory({ positionals: ["two-sum"], flags: { offset: "-1" } }, deps),
+    /--offset 需为非负整数/,
+  );
+});
+
+test("cmdHistory 校验 --id 必须为数字", async () => {
+  await assert.rejects(
+    () => cmdHistory({ positionals: ["two-sum"], flags: { id: "abc" } }, { cwd: "/tmp", session: "T" }),
+    /--id 需为数字提交 ID/,
+  );
+});
+
+test("cmdHistory 先取列表再批量取统计并输出表格", async () => {
+  const calls = [];
+  const fakeFetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    if (body.query.includes("submissionList")) {
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          data: {
+            submissionList: {
+              hasNext: true,
+              submissions: [
+                { id: "1", status: "AC", statusDisplay: "Accepted", lang: "python3", langName: "Python3", runtime: "3 ms", memory: "20.3 MB", timestamp: "1791886149" },
+                { id: "2", status: "WA", statusDisplay: "Wrong Answer", lang: "python3", langName: "Python3", runtime: "N/A", memory: "N/A", timestamp: "1791886100" },
+              ],
+            },
+          },
+        }),
+      };
+    }
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        data: {
+          s0: { id: "1", runtimePercentile: 51.66, memoryPercentile: 40.87, passedTestCaseCnt: 65, totalTestCaseCnt: 65 },
+          s1: { id: "2", runtimePercentile: 0, memoryPercentile: 0, passedTestCaseCnt: 0, totalTestCaseCnt: 65 },
+        },
+      }),
+    };
+  };
+  const out = [];
+  await cmdHistory(
+    { positionals: ["two-sum"], flags: {} },
+    { cwd: "/tmp", session: "T", fetchImpl: fakeFetch, out: (s) => out.push(s), zh: true },
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].variables.questionSlug, "two-sum");
+  assert.ok(calls[1].query.includes('s0: submissionDetail(submissionId: "1")'));
+  assert.ok(calls[1].query.includes('s1: submissionDetail(submissionId: "2")'));
+  const text = out.join("\n");
+  assert.ok(text.includes("65/65"));
+  assert.ok(text.includes("0/65"));
+  assert.ok(text.includes("51.7%"));
+});
+
+test("cmdHistory 列表为空时提示 Cookie 可能过期", async () => {
+  const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ data: { submissionList: { hasNext: false, submissions: [] } } }) });
+  const out = [];
+  const warns = [];
+  await cmdHistory(
+    { positionals: ["two-sum"], flags: {} },
+    { cwd: "/tmp", session: "T", fetchImpl: fakeFetch, out: (s) => out.push(s), warn: (s) => warns.push(s), zh: true },
+  );
+  assert.ok(out.join("\n").includes("未查到"));
+  assert.ok(warns.join("\n").includes("Cookie"));
+});
+
+test("cmdHistory --id 输出单次详情", async () => {
+  const fakeFetch = async () => ({
+    ok: true, status: 200,
+    json: async () => ({
+      data: {
+        detail: {
+          id: "754578653",
+          code: "class Solution:\n    pass\n",
+          timestamp: 1791886149,
+          statusDisplay: "Accepted",
+          runtime: "3 ms",
+          memory: "20.3 MB",
+          runtimePercentile: 51.66,
+          memoryPercentile: 40.87,
+          passedTestCaseCnt: 65,
+          totalTestCaseCnt: 65,
+          lang: "python3",
+          langVerboseName: "Python3",
+          outputDetail: { codeOutput: "", expectedOutput: "", input: "", compileError: "", runtimeError: "", lastTestcase: "" },
+        },
+      },
+    }),
+  });
+  const out = [];
+  await cmdHistory(
+    { positionals: ["two-sum"], flags: { id: "754578653" } },
+    { cwd: "/tmp", session: "T", fetchImpl: fakeFetch, out: (s) => out.push(s), zh: true },
+  );
+  const text = out.join("\n");
+  assert.ok(text.includes("754578653"));
+  assert.ok(text.includes("class Solution:"));
 });
