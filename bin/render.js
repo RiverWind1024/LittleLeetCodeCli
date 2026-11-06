@@ -213,12 +213,17 @@ export function renderSubmissionDetail(d, { style: st = style, zh = isChineseEnv
   if (!d) return zh ? "未找到提交" : "Submission not found";
   const L = zh ? DETAIL_LABEL_ZH : DETAIL_LABEL_EN;
   const lines = [];
+  // 标签按显示宽度对齐（中文占 2 列，英文标签长度不一）
+  const labelWidth = Math.max(
+    strWidth(L.time), strWidth(L.lang), strWidth(L.runtime), strWidth(L.memory), strWidth(L.cases),
+  );
+  const padFor = (label) => " ".repeat(labelWidth - strWidth(label) + 2);
   lines.push(`  ${st.bold(String(d.id ?? ""))}  ${st.dim(d.statusDisplay ?? "")}`);
-  lines.push(`  ${st.dim(L.time)}   ${formatTimestamp(d.timestamp)}`);
-  lines.push(`  ${st.dim(L.lang)}   ${d.langName || d.lang || ""}`);
-  lines.push(`  ${st.dim(L.runtime)}  ${d.runtime || DASH}${beatSuffix(d.runtimePercentile, zh)}`);
-  lines.push(`  ${st.dim(L.memory)}  ${d.memory || DASH}${beatSuffix(d.memoryPercentile, zh)}`);
-  lines.push(`  ${st.dim(L.cases)}   ${casesText(d.passedTestCaseCnt, d.totalTestCaseCnt)}`);
+  lines.push(`  ${st.dim(L.time)}${padFor(L.time)}${formatTimestamp(d.timestamp)}`);
+  lines.push(`  ${st.dim(L.lang)}${padFor(L.lang)}${d.langName || d.lang || ""}`);
+  lines.push(`  ${st.dim(L.runtime)}${padFor(L.runtime)}${d.runtime || DASH}${beatSuffix(d.runtimePercentile, zh)}`);
+  lines.push(`  ${st.dim(L.memory)}${padFor(L.memory)}${d.memory || DASH}${beatSuffix(d.memoryPercentile, zh)}`);
+  lines.push(`  ${st.dim(L.cases)}${padFor(L.cases)}${casesText(d.passedTestCaseCnt, d.totalTestCaseCnt)}`);
 
   const od = d.outputDetail ?? {};
   const errText = od.compileError || od.runtimeError || "";

@@ -554,3 +554,21 @@ test("main: lc help 总览列出 history 命令", async () => {
   });
   assert.match(out.join("\n"), /lc history <slug>/);
 });
+
+test("renderSubmissionDetail 标签与值按显示宽度对齐", () => {
+  const valueCol = (line, label) => {
+    const tail = line.slice(line.indexOf(label) + label.length);
+    return line.indexOf(tail.trim());
+  };
+  for (const zh of [true, false]) {
+    const out = renderSubmissionDetail(DETAIL_FIXTURE, { zh });
+    const L = zh
+      ? { time: "时间", lang: "语言", runtime: "耗时", memory: "内存", cases: "用例" }
+      : { time: "Time", lang: "Language", runtime: "Runtime", memory: "Memory", cases: "Cases" };
+    const cols = Object.values(L).map((label) => {
+      const line = out.split("\n").find((l) => l.includes(label));
+      return valueCol(line, label);
+    });
+    assert.equal(new Set(cols).size, 1, `zh=${zh} 时值未对齐：${cols.join(",")}`);
+  }
+});
