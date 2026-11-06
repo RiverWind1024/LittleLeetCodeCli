@@ -1,7 +1,7 @@
 # 小巧LeetCode CLI
 
-`lc` 是一个零运行时依赖的 CLI（单文件 `bin/lc.mjs`，只用 Node 内置模块），用命令行刷 [leetcode.cn](https://leetcode.cn) 。
-核心是通过 [leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server) 连接 leetcode，
+`lc` 是一个零运行时依赖的 CLI（只用 Node 内置模块，无任何第三方包），用命令行刷 [leetcode.cn](https://leetcode.cn) 。
+核心是直接调用 leetcode.cn 的 GraphQL 与判题接口，
 完成刷题闭环：**列题 → 生成代码文件 → 写代码 → 跑样例 → 提交**。
 
 > 为什么做这个：感觉 vscode 和 IDEA 上的 LeetCode 插件不太好用，干脆自己写一个小巧的工具，直接通过终端运行（以及避免老板发现你在刷leetcode）。
@@ -10,7 +10,8 @@
 
 ## 特性
 
-- **零运行时依赖** — 单文件 `bin/lc.mjs`，只用 Node 内置模块，`npm install` 只为装 MCP server，不用了直接删除
+- **零运行时依赖** — 只用 Node 内置模块，无需 `npm install`，`node_modules` 为空
+- **直连 leetcode.cn** — GraphQL 查询与判题都自己实现，不经任何中间服务
 - **完整闭环** — `list` → `show` → `run` → `submit`，全程不出终端
 - **多语言** — python3 / cpp / java / golang / javascript / typescript / rust / c
 - **随机刷题** — `lc random` 在筛选范围内均匀抽题
@@ -44,8 +45,7 @@
 ## 快速开始
 
 ```bash
-npm install          # 安装 MCP server 依赖
-npm link             # 把 lc 链接到 PATH（一次性）
+npm link             # 把 lc 链接到 PATH（一次性，无需 npm install）
 lc init              # 引导配置登录 Cookie
 lc list two-sum          # 搜题
 lc progress --limit 10   # 已解决统计与列表（需登录）
@@ -106,7 +106,7 @@ LEETCODE_SESSION=<值> lc submit two-sum
 
 | 命令 | 说明 |
 |---|---|
-| `init` | 安装 MCP 依赖；未配置 Cookie 时交互引导写入 |
+| `init` | 未配置 Cookie 时交互引导写入（零依赖，无需安装任何包） |
 | `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（`session` 登录 Cookie、`lang` 默认语言、`locale` 显示语言 zh/en/auto） |
 | `list [关键词]` | 搜索题目，输出带边框表格；登录后含已解决状态列 |
 | `random` | 随机抽取一题（只打印，不生成文件） |
@@ -207,12 +207,13 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 143 个单元/集成测试（node:test）
+npm test           # 161 个单元/集成测试（node:test）
 ```
 
-测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。
+测试不依赖网络：所有 LeetCode 请求都通过注入的假 `fetch` 验证，因此可离线跑。
 
-VS Code 用户还可以在 `.vscode/mcp.json` 里直接挂同一个 MCP server，用 AI 助手刷题。
+VS Code 用户还可以在 `.vscode/mcp.json` 里挂 [leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server)，
+用 AI 助手刷题——那条链路与 `lc` CLI 完全解耦，不影响 CLI 的零依赖。
 
 ---
 
@@ -223,20 +224,21 @@ VS Code 用户还可以在 `.vscode/mcp.json` 里直接挂同一个 MCP server�
 | `lc: command not found` | 还没 `npm link`，或改用 `node bin/lc.mjs <命令>` |
 | `该操作需要登录…` | Cookie 缺失或过期，重新执行 `lc config set session` |
 | `当前目录不是 LittleLeetCodeCli 项目根目录` | 不在项目根目录，`cd` 回去再运行 |
-| `未找到本地 MCP server，回退使用 npx` | 本地依赖缺失，跑一次 `npm install` |
-| `MCP server 提前退出` | 依赖损坏，尝试 `rm -rf node_modules && npm install` |
-| `MCP 调用超时` | 调大 `--timeout`，或检查网络 |
+| `请求 leetcode.cn 失败：HTTP 5xx` | LeetCode 服务端异常，稍后重试 |
+| `判题超时（120000ms）` | 调大 `--timeout`，或检查网络 |
 
 ---
 
 ## 致谢
 
-本项目的题面获取、用例运行、代码提交等能力，全部依赖
-**[leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server)**（作者 [@jinzcdev](https://github.com/jinzcdev)，npm [`@jinzcdev/leetcode-mcp-server`](https://www.npmjs.com/package/@jinzcdev/leetcode-mcp-server)）。
+`lc` 直接访问 leetcode.cn 的公开接口：题目与搜索用 GraphQL，运行与提交用官方判题 REST 接口
+（判题接口未提供 GraphQL mutation，只能轮询 `/check/`）。接口实现参考了
+**[leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server)**（作者 [@jinzcdev](https://github.com/jinzcdev)，npm [`@jinzcdev/leetcode-mcp-server`](https://www.npmjs.com/package/@jinzcdev/leetcode-mcp-server)）
+的实现思路，感谢作者的开源与维护。
 
-`lc` 本体只做命令行交互与本地文件管理；除 `history` 外的 LeetCode 通信、GraphQL 查询、判题轮询都在这个 MCP server 里完成。`history` 因需要批量拉取提交详情，直接访问 leetcode.cn 的公开 GraphQL 接口。没有它就没有这个工具，感谢作者的开源与维护。
+同时也对 LeetCode 官方 MCP Server 的提供方致谢——它让 AI 助手也能用上这套接口。
 
-同时也感谢 LeetCode 提供的平台，以及所有开源社区的贡献者。
+同时感谢 LeetCode 提供的平台，以及所有开源社区的贡献者。
 
 ---
 
