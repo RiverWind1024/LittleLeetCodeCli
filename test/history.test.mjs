@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
-import { submissionStatusLabel, formatTimestamp, renderHistoryTable } from "../bin/render.js";
+import { submissionStatusLabel, formatTimestamp, renderHistoryTable, renderSubmissionDetail } from "../bin/render.js";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -303,4 +303,71 @@ test("renderHistoryTable 缺失统计字段时显示占位符", () => {
 test("renderHistoryTable 空列表返回空状态文案", () => {
   assert.equal(renderHistoryTable([], { zh: true }), "暂无提交记录");
   assert.equal(renderHistoryTable([], { zh: false }), "No submissions");
+});
+
+const DETAIL_FIXTURE = {
+  id: "754578653",
+  code: "class Solution:\n    def twoSum(self, nums):\n        return [0, 1]\n",
+  timestamp: 1791886149,
+  statusDisplay: "Accepted",
+  runtime: "3 ms",
+  memory: "20.3 MB",
+  runtimePercentile: 51.66,
+  memoryPercentile: 40.87,
+  passedTestCaseCnt: 65,
+  totalTestCaseCnt: 65,
+  langName: "Python3",
+  outputDetail: {
+    codeOutput: "", expectedOutput: "", input: "",
+    compileError: "", runtimeError: "", lastTestcase: "",
+  },
+};
+
+test("renderSubmissionDetail 输出摘要与源码", () => {
+  const out = renderSubmissionDetail(DETAIL_FIXTURE, { zh: true });
+  assert.ok(out.includes("754578653"));
+  assert.ok(out.includes("Accepted"));
+  assert.ok(out.includes("Python3"));
+  assert.ok(out.includes("3 ms"));
+  assert.ok(out.includes("51.7%"));
+  assert.ok(out.includes("40.9%"));
+  assert.ok(out.includes("65/65"));
+  assert.ok(out.includes("class Solution:"));
+  assert.ok(out.includes("    def twoSum(self, nums):"));
+  assert.ok(out.includes("源码"));
+});
+
+test("renderSubmissionDetail 失败时给出输入/期望/实际", () => {
+  const out = renderSubmissionDetail({
+    ...DETAIL_FIXTURE,
+    statusDisplay: "Wrong Answer",
+    passedTestCaseCnt: 3,
+    outputDetail: {
+      codeOutput: "[3]", expectedOutput: "[2]", input: "nums=[1,2], target=3",
+      compileError: "", runtimeError: "", lastTestcase: "",
+    },
+  }, { zh: true });
+  assert.ok(out.includes("首个失败用例"));
+  assert.ok(out.includes("输入"));
+  assert.ok(out.includes("期望"));
+  assert.ok(out.includes("实际"));
+  assert.ok(out.includes("[3]"));
+  assert.ok(out.includes("[2]"));
+});
+
+test("renderSubmissionDetail 运行时错误单独标红输出", () => {
+  const out = renderSubmissionDetail({
+    ...DETAIL_FIXTURE,
+    outputDetail: {
+      codeOutput: "", expectedOutput: "", input: "",
+      compileError: "", runtimeError: "IndexError: list index out of range", lastTestcase: "",
+    },
+  }, { zh: true });
+  assert.ok(out.includes("IndexError: list index out of range"));
+});
+
+test("renderSubmissionDetail 英文模式使用英文标签", () => {
+  const out = renderSubmissionDetail(DETAIL_FIXTURE, { zh: false });
+  assert.ok(out.includes("Code"));
+  assert.ok(out.includes("Language"));
 });

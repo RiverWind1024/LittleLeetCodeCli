@@ -190,3 +190,59 @@ export function renderHistoryTable(submissions, { style: st = style, zh = isChin
   });
   return renderTable(header, rows, { style: st });
 }
+
+const DETAIL_LABEL_ZH = {
+  time: "时间", lang: "语言", runtime: "耗时", memory: "内存", cases: "用例",
+  code: "源码", fail: "首个失败用例", input: "输入", expect: "期望", actual: "实际",
+  err: "错误",
+};
+
+const DETAIL_LABEL_EN = {
+  time: "Time", lang: "Language", runtime: "Runtime", memory: "Memory", cases: "Cases",
+  code: "Code", fail: "First failing case", input: "Input", expect: "Expected", actual: "Actual",
+  err: "Error",
+};
+
+function beatSuffix(v, zh) {
+  const text = percentileText(v);
+  if (text === DASH) return "";
+  return zh ? `（击败 ${text}）` : ` (beat ${text})`;
+}
+
+export function renderSubmissionDetail(d, { style: st = style, zh = isChineseEnv() } = {}) {
+  if (!d) return zh ? "未找到提交" : "Submission not found";
+  const L = zh ? DETAIL_LABEL_ZH : DETAIL_LABEL_EN;
+  const lines = [];
+  lines.push(`  ${st.bold(String(d.id ?? ""))}  ${st.dim(d.statusDisplay ?? "")}`);
+  lines.push(`  ${st.dim(L.time)}   ${formatTimestamp(d.timestamp)}`);
+  lines.push(`  ${st.dim(L.lang)}   ${d.langName || d.lang || ""}`);
+  lines.push(`  ${st.dim(L.runtime)}  ${d.runtime || DASH}${beatSuffix(d.runtimePercentile, zh)}`);
+  lines.push(`  ${st.dim(L.memory)}  ${d.memory || DASH}${beatSuffix(d.memoryPercentile, zh)}`);
+  lines.push(`  ${st.dim(L.cases)}   ${casesText(d.passedTestCaseCnt, d.totalTestCaseCnt)}`);
+
+  const od = d.outputDetail ?? {};
+  const errText = od.compileError || od.runtimeError || "";
+  if (errText) {
+    lines.push("");
+    lines.push(`  ${st.red(L.err)}`);
+    for (const l of String(errText).replace(/\s+$/, "").split("\n")) lines.push(`    ${st.red(l)}`);
+  }
+
+  lines.push("");
+  lines.push(`  ${st.bold(L.code)}`);
+  for (const l of String(d.code ?? "").replace(/\s+$/, "").split("\n")) {
+    lines.push(l ? `    ${l}` : "");
+  }
+
+  const failRows = [
+    [L.input, od.input],
+    [L.expect, od.expectedOutput],
+    [L.actual, od.codeOutput],
+  ].filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "");
+  if (failRows.length) {
+    lines.push("");
+    lines.push(`  ${st.yellow(L.fail)}`);
+    for (const [k, v] of failRows) lines.push(`    ${st.dim(k)}  ${String(v).split("\n")[0]}`);
+  }
+  return lines.join("\n");
+}
