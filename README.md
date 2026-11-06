@@ -15,6 +15,7 @@
 - **多语言** — python3 / cpp / java / golang / javascript / typescript / rust / c
 - **随机刷题** — `lc random` 在筛选范围内均匀抽题
 - **已做标记** — 登录后 `list` 显示 ✅/空 状态列，`progress` 查看已解决统计与最近提交
+- **提交历史** — `lc history <slug>` 查某题的历次提交：状态、耗时、内存、击败百分位、通过用例数，`--id` 看单次源码
 - **自约束** — 命令只在项目根目录有效，不会在别处误建目录或误读凭据
 
 ## 目录
@@ -63,7 +64,7 @@ lc submit two-sum    # 提交
 
 ## 认证
 
-`run` 和 `submit` 需要登录，`progress` 同样需要；
+`run` 和 `submit` 需要登录，`progress` 和 `history` 同样需要；
 `list` 未登录时只不显示状态列，`show` 不需要登录。
 
 ### 获取 Cookie
@@ -113,6 +114,7 @@ LEETCODE_SESSION=<值> lc submit two-sum
 | `show <slug>` | 取题目、生成代码文件、按 locale 打印中/英题面 |
 | `run <slug>` | 用题目默认样例运行本地代码 |
 | `submit <slug>` | 提交本地代码 |
+| `history <slug>` | 查看某题的历史提交记录与得分（需登录） |
 
 > 任何命令都可以用 `lc <命令> --help`（或 `lc help <命令>`）查看该命令的完整用法。
 
@@ -129,11 +131,28 @@ LEETCODE_SESSION=<值> lc submit two-sum
 |---|---|---|
 | `--difficulty EASY\|MEDIUM\|HARD` | `list` `random` `progress` | 难度过滤（大小写不敏感） |
 | `--tags a,b` | `list` `random` | 标签过滤，逗号分隔 |
-| `--limit N` | `list` `progress` | 条数，默认 `20`（`progress` 按最近提交倒序） |
-| `--offset N` | `progress` | 跳过前 N 条 |
+| `--limit N` | `list` `progress` `history` | 条数，默认 `20`（`progress` 按最近提交倒序；`history` 上限 `100`） |
+| `--offset N` | `progress` `history` | 跳过前 N 条 |
 | `--refresh` | `list` `progress` | 忽略 24h 缓存，强制重新拉取已解决列表 |
 | `--force` | `show` | 覆盖已存在的代码文件 |
 | `--input "..."` | `run` | 自定义测试输入；不给则用题目默认样例 |
+| `--id <提交ID>` | `history` | 查看单次提交的完整详情（含源码与失败诊断） |
+
+### 查看提交历史
+
+```bash
+lc history two-sum                    # 该题的历史提交表格
+lc history two-sum --limit 30         # 每页条数（默认 20，上限 100）
+lc history two-sum --offset 20        # 翻页
+lc history two-sum --id 754578653     # 单次提交详情（含源码与失败诊断）
+```
+
+表格列：提交时间 / 状态 / 语言 / 耗时 / 内存 / 击败% / 用例 / ID。
+
+- 状态：`✓ 通过` 表示 Accepted；`✗ 答案错误`、`✗ 超时` 等表示失败。
+- 击败% 是运行时间的击败百分位；失败提交无有效百分位时显示 `—`。
+- `--id` 输出的源码是完整代码，可直接重定向到文件：`lc history two-sum --id 754578653 > solution.py`。
+- 若提示「未查到提交记录」但你确定提交过，通常是 Cookie 已过期，重新执行 `lc config set session <cookie>`。
 
 ### 支持的语言
 
@@ -188,7 +207,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 104 个单元/集成测试（node:test）
+npm test           # 140 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。
@@ -215,7 +234,7 @@ VS Code 用户还可以在 `.vscode/mcp.json` 里直接挂同一个 MCP server�
 本项目的题面获取、用例运行、代码提交等能力，全部依赖
 **[leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server)**（作者 [@jinzcdev](https://github.com/jinzcdev)，npm [`@jinzcdev/leetcode-mcp-server`](https://www.npmjs.com/package/@jinzcdev/leetcode-mcp-server)）。
 
-`lc` 本体只做命令行交互与本地文件管理，真正的 LeetCode 通信、GraphQL 查询、判题轮询都在这个 MCP server 里完成。没有它就没有这个工具，感谢作者的开源与维护。
+`lc` 本体只做命令行交互与本地文件管理；除 `history` 外的 LeetCode 通信、GraphQL 查询、判题轮询都在这个 MCP server 里完成。`history` 因需要批量拉取提交详情，直接访问 leetcode.cn 的公开 GraphQL 接口。没有它就没有这个工具，感谢作者的开源与维护。
 
 同时也感谢 LeetCode 提供的平台，以及所有开源社区的贡献者。
 

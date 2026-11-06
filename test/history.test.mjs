@@ -1,8 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
 import { submissionStatusLabel, formatTimestamp, renderHistoryTable, renderSubmissionDetail } from "../bin/render.js";
-import { cmdHistory } from "../bin/lc.mjs";
+import { cmdHistory, main } from "../bin/lc.mjs";
+
+const fakeRoot = () => {
+  const dir = mkdtempSync(join(tmpdir(), "lc-"));
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "little-leetcode-cli" }));
+  return dir;
+};
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -503,4 +512,45 @@ test("cmdHistory --id 输出单次详情", async () => {
   const text = out.join("\n");
   assert.ok(text.includes("754578653"));
   assert.ok(text.includes("class Solution:"));
+});
+
+test("main: lc history --help 打印该命令用法且不调用接口", async () => {
+  const out = [];
+  await main(["history", "--help"], {
+    cwd: fakeRoot(),
+    out: (s) => out.push(s),
+    errOut: () => {},
+    zh: true,
+  });
+  assert.match(out.join("\n"), /用法：lc history <slug>/);
+});
+
+test("main: lc history 走 cmdHistory 分支", async () => {
+  const fakeFetch = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ data: { submissionList: { hasNext: false, submissions: [] } } }),
+  });
+  const out = [];
+  const warns = [];
+  await main(["history", "two-sum"], {
+    cwd: fakeRoot(),
+    out: (s) => out.push(s),
+    errOut: () => {},
+    warn: (s) => warns.push(s),
+    fetchImpl: fakeFetch,
+    session: "T",
+    zh: true,
+  });
+  assert.ok(out.join("\n").includes("未查到"));
+});
+
+test("main: lc help 总览列出 history 命令", async () => {
+  const out = [];
+  await main(["help"], {
+    cwd: fakeRoot(),
+    out: (s) => out.push(s),
+    errOut: () => {},
+    zh: true,
+  });
+  assert.match(out.join("\n"), /lc history <slug>/);
 });

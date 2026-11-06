@@ -874,7 +874,9 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     ...deps,
   };
 
-  const { session, env: mergedEnv } = loadEnv(d.cwd);
+  const { session: fileSession, env: mergedEnv } = loadEnv(d.cwd);
+  // deps.session 可覆盖 .env 里的配置（测试注入用）
+  const session = d.session ?? fileSession;
   d.zh = d.zh ?? isChineseEnv(mergedEnv);
 
   const opts = parseArgs(argv);
@@ -905,6 +907,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
       case "show":    await cmdShow(opts, { ...d, session }); break;
       case "run":     await cmdRun(opts, { ...d, session }); break;
       case "submit":  await cmdSubmit(opts, { ...d, session }); break;
+      case "history": await cmdHistory(opts, { ...d, session }); break;
       case null:      printHelp(d.out, { zh: d.zh }); break;
       default:
         d.errOut(`未知命令：${opts.command}`);
