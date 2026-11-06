@@ -207,7 +207,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 141 个单元/集成测试（node:test）
+npm test           # 143 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：MCP 调用与中文题面抓取都通过注入的假实现验证，因此可离线跑。
