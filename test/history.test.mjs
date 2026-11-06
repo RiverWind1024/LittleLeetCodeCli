@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
+import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/api.js";
 import { submissionStatusLabel, formatTimestamp, renderHistoryTable, renderSubmissionDetail } from "../bin/render.js";
 import { createStyle } from "../bin/utils.js";
 import { cmdHistory, main } from "../bin/lc.mjs";
@@ -47,7 +47,7 @@ test("lcGraphql 接口返回 errors 时抛错并带原因", async () => {
   });
   await assert.rejects(
     () => lcGraphql("query { x }", {}, { fetchImpl: fakeFetch, session: "T" }),
-    /获取提交历史失败.*字段不存在/,
+    /请求 leetcode\.cn 失败.*字段不存在/,
   );
 });
 
@@ -55,7 +55,7 @@ test("lcGraphql HTTP 非 2xx 时抛错", async () => {
   const fakeFetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
   await assert.rejects(
     () => lcGraphql("query { x }", {}, { fetchImpl: fakeFetch, session: "T" }),
-    /获取提交历史失败.*HTTP 500/,
+    /请求 leetcode\.cn 失败.*HTTP 500/,
   );
 });
 
@@ -66,7 +66,7 @@ test("lcGraphql 响应体非 JSON 时抛错", async () => {
   });
   await assert.rejects(
     () => lcGraphql("query { x }", {}, { fetchImpl: fakeFetch, session: "T" }),
-    /获取提交历史失败.*非 JSON/,
+    /请求 leetcode\.cn 失败.*非 JSON/,
   );
 });
 
@@ -74,7 +74,7 @@ test("lcGraphql 缺少 data 字段时抛错", async () => {
   const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
   await assert.rejects(
     () => lcGraphql("query { x }", {}, { fetchImpl: fakeFetch, session: "T" }),
-    /获取提交历史失败.*未返回预期数据/,
+    /请求 leetcode\.cn 失败.*未返回预期数据/,
   );
 });
 

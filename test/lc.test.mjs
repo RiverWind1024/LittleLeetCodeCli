@@ -17,7 +17,6 @@ import {
   cmdRandom,
   formatVerdict,
   verdictOk,
-  resolveMcpBin,
   cmdConfig,
   mask,
   readDefaultLang,
@@ -29,7 +28,6 @@ import {
   cmdProgress,
   cmdShow,
   renderProblemHeader,
-  fetchTranslated,
   cmdRun,
   cmdSubmit,
   main,
@@ -124,7 +122,7 @@ test("parseArgs 识别 -h 与 --help", () => {
   assert.equal(parseArgs(["list", "--help"]).flags.help, true);
 });
 
-test("main: lc <命令> --help 打印该命令用法且不调用 MCP", async () => {
+test("main: lc <命令> --help 打印该命令用法且不请求接口", async () => {
   const out = [];
   let called = false;
   await main(["submit", "--help"], {
@@ -544,20 +542,6 @@ test("htmlToText 把上下标渲染为 ^ 和 _，不丢语义", () => {
   assert.equal(htmlToText("<code>2<sup>30</sup> = 1073741824</code>"), "2^30 = 1073741824");
 });
 
-test("resolveMcpBin 优先本地 bin，否则回退 npx", () => {
-  const cwd = tmp();
-  const binDir = join(cwd, "node_modules", ".bin");
-  mkdirSync(binDir, { recursive: true });
-  writeFileSync(join(binDir, "leetcode-mcp-server"), "");
-  const local = resolveMcpBin(cwd);
-  assert.equal(local.cmd, join(binDir, "leetcode-mcp-server"));
-  assert.equal(local.local, true);
-
-  const fallback = resolveMcpBin(tmp());
-  assert.equal(fallback.cmd, "npx");
-  assert.equal(fallback.local, false);
-});
-
 test("cmdConfig set/get/unset/list 操作 .env 并遮蔽输出", () => {
   const cwd = tmp();
   const out = [];
@@ -660,35 +644,32 @@ test("readDefaultLang/chooseLang 解析默认语言，命令行优先", () => {
   assert.equal(chooseLang({}, cwd), "python3");
 });
 
-test("cmdInit：本地已装则跳过 npm，未配会话则引导写入", async () => {
+test("cmdInit：零依赖不装包，未配会话时引导写入 .env", async () => {
   const cwd = tmp();
-  mkdirSync(join(cwd, "node_modules", ".bin"), { recursive: true });
-  writeFileSync(join(cwd, "node_modules", ".bin", "leetcode-mcp-server"), "");
-  let npmCalled = false;
   const out = [];
   await cmdInit({}, {
     cwd,
     env: {},
     out: (s) => out.push(s),
-    exec: () => { npmCalled = true; return { status: 0 }; },
     promptCookie: async () => "cookie123",
   });
-  assert.equal(npmCalled, false);
   assert.match(readFileSync(join(cwd, ".env"), "utf8"), /LEETCODE_SESSION=cookie123/);
+  assert.ok(out.some((s) => s.includes("零依赖")));
 });
 
-test("cmdInit：本地依赖缺失时调用 npm install", async () => {
+test("cmdInit：已配置 Cookie 时跳过写入", async () => {
   const cwd = tmp();
-  const calls = [];
+  writeFileSync(join(cwd, ".env"), "LEETCODE_SESSION=already\n");
+  const out = [];
+  let prompted = false;
   await cmdInit({}, {
     cwd,
     env: {},
-    out: () => {},
-    exec: (cmd, args) => { calls.push([cmd, args]); return { status: 0 }; },
-    promptCookie: async () => "",
+    out: (s) => out.push(s),
+    promptCookie: async () => { prompted = true; return ""; },
   });
-  assert.equal(calls[0][0], "npm");
-  assert.deepEqual(calls[0][1], ["install"]);
+  assert.equal(prompted, false);
+  assert.equal(readFileSync(join(cwd, ".env"), "utf8"), "LEETCODE_SESSION=already\n");
 });
 
 test("loadSolved 分页抓取、按 slug 去重并按最近提交倒序写入缓存", async () => {
@@ -923,7 +904,6 @@ test("cmdShow 生成代码文件并打印描述，二次调用跳过", async () 
     cwd,
     session: "",
     out: (s) => out.push(s),
-    fetchTranslated: async () => null,
     callTool: async () => ({
       problem: {
         questionId: "1",
@@ -956,8 +936,11 @@ test("cmdShow 生成文件顶部写入题目注释（中文优先，在代码之
   const cwd = tmp();
   await cmdShow({ positionals: ["two-sum"], flags: {} }, {
     cwd, session: "", out: () => {}, zh: true,
-    fetchTranslated: async () => ({ title: "两数之和", content: "<p>给定一个整数数组。</p>" }),
-    callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [{ langSlug: "python3", code: "class Solution:\n    pass" }] } }),
+    callTool: async () => ({ problem: {
+      questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>",
+      translatedTitle: "两数之和", translatedContent: "<p>给定一个整数数组。</p>",
+      codeSnippets: [{ langSlug: "python3", code: "class Solution:\n    pass" }],
+    } }),
   });
   const src = readFileSync(join(cwd, "solutions", "0001-two-sum", "python3", "solution.py"), "utf8");
   assert.match(src, /^# 两数之和\n/);
@@ -970,7 +953,6 @@ test("cmdShow 文件头部注释使用对应语言的注释符", async () => {
   const cwd = tmp();
   await cmdShow({ positionals: ["two-sum"], flags: { lang: "cpp" } }, {
     cwd, session: "", out: () => {},
-    fetchTranslated: async () => null,
     callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [{ langSlug: "cpp", code: "class Solution {};" }] } }),
   });
   const src = readFileSync(join(cwd, "solutions", "0001-two-sum", "cpp", "solution.cpp"), "utf8");
@@ -982,7 +964,6 @@ test("cmdShow 无题面且无标题时不写头部注释", async () => {
   const cwd = tmp();
   await cmdShow({ positionals: ["two-sum"], flags: {} }, {
     cwd, session: "", out: () => {},
-    fetchTranslated: async () => null,
     callTool: async () => ({ problem: { questionId: "1", codeSnippets: [{ langSlug: "python3", code: "x" }] } }),
   });
   assert.equal(readFileSync(join(cwd, "solutions", "0001-two-sum", "python3", "solution.py"), "utf8"), "x\n");
@@ -993,14 +974,12 @@ test("cmdShow 未指定 --lang 时使用 .env 默认语言，--lang 可覆盖", 
   writeFileSync(join(cwd, ".env"), "DEFAULT_LANG=cpp\n");
   await cmdShow({ positionals: ["two-sum"], flags: {} }, {
     cwd, session: "", out: () => {},
-    fetchTranslated: async () => null,
     callTool: async () => ({ problem: { questionId: "1", codeSnippets: [{ langSlug: "cpp", code: "x" }] } }),
   });
   assert.equal(readFileSync(join(cwd, "solutions", "0001-two-sum", "cpp", "solution.cpp"), "utf8"), "x\n");
 
   await cmdShow({ positionals: ["two-sum"], flags: { lang: "rust" } }, {
     cwd, session: "", out: () => {},
-    fetchTranslated: async () => null,
     callTool: async () => ({ problem: { questionId: "1", codeSnippets: [{ langSlug: "rust", code: "fn f() {}" }] } }),
   });
   assert.equal(readFileSync(join(cwd, "solutions", "0001-two-sum", "rust", "solution.rs"), "utf8"), "fn f() {}\n");
@@ -1015,8 +994,7 @@ test("cmdShow --force 覆盖已有文件", async () => {
     { positionals: ["two-sum"], flags: { force: true } },
     {
       cwd, session: "", out: () => {},
-      fetchTranslated: async () => null,
-      callTool: async () => ({ problem: { questionId: "1", content: "<p>x</p>", codeSnippets: [{ langSlug: "python3", code: "new" }] } }),
+        callTool: async () => ({ problem: { questionId: "1", content: "<p>x</p>", codeSnippets: [{ langSlug: "python3", code: "new" }] } }),
     }
   );
   assert.equal(readFileSync(join(dir, "solution.py"), "utf8"), "# x\n\nnew\n");
@@ -1028,8 +1006,7 @@ test("cmdShow 无匹配 snippet 时写入空模板", async () => {
     { positionals: ["two-sum"], flags: { lang: "cpp" } },
     {
       cwd, session: "", out: () => {},
-      fetchTranslated: async () => null,
-      callTool: async () => ({ problem: { questionId: "1", content: "<p>x</p>", codeSnippets: [] } }),
+        callTool: async () => ({ problem: { questionId: "1", content: "<p>x</p>", codeSnippets: [] } }),
     }
   );
   assert.equal(
@@ -1101,8 +1078,11 @@ test("cmdShow 优先展示中文标题与题面", async () => {
     { positionals: ["two-sum"], flags: {} },
     {
       cwd: tmp(), session: "", out: (s) => out.push(s), zh: true,
-      fetchTranslated: async () => ({ title: "两数之和", content: "<p>给定一个整数数组。</p>" }),
-      callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
+      callTool: async () => ({ problem: {
+        questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>",
+        translatedTitle: "两数之和", translatedContent: "<p>给定一个整数数组。</p>",
+        codeSnippets: [],
+      } }),
     }
   );
   const text = out.join("\n");
@@ -1111,14 +1091,13 @@ test("cmdShow 优先展示中文标题与题面", async () => {
   assert.doesNotMatch(text, /Two Sum/);
 });
 
-test("cmdShow 中文不可用时回退英文", async () => {
+test("cmdShow 题面无中文翻译时回退英文", async () => {
   const out = [];
   await cmdShow(
     { positionals: ["two-sum"], flags: {} },
     {
       cwd: tmp(), session: "", out: (s) => out.push(s), zh: true,
-      fetchTranslated: async () => null,
-      callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
+        callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
     }
   );
   const text = out.join("\n");
@@ -1126,41 +1105,32 @@ test("cmdShow 中文不可用时回退英文", async () => {
   assert.match(text, /Given an array\./);
 });
 
-test("cmdShow 英文 locale 使用英文题面且不调用中文接口", async () => {
+test("cmdShow 英文 locale 使用英文题面", async () => {
   const out = [];
-  let calledFetch = false;
   await cmdShow(
     { positionals: ["two-sum"], flags: {} },
     {
       cwd: tmp(), session: "", out: (s) => out.push(s), zh: false,
-      fetchTranslated: async () => { calledFetch = true; return { title: "两数之和", content: "<p>给定一个整数数组。</p>" }; },
-      callTool: async () => ({ problem: { questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>", codeSnippets: [] } }),
+      callTool: async () => ({
+        problem: {
+          questionId: "1", title: "Two Sum", content: "<p>Given an array.</p>",
+          translatedTitle: "两数之和", translatedContent: "<p>给定一个整数数组。</p>",
+          codeSnippets: [],
+        },
+      }),
     }
   );
-  assert.equal(calledFetch, false);
   const text = out.join("\n");
   assert.match(text, /Two Sum/);
   assert.match(text, /Given an array\./);
   assert.doesNotMatch(text, /两数之和/);
 });
 
-test("fetchTranslated 网络异常时返回 null，不抛错", async () => {
-  const zh = await fetchTranslated("two-sum", { fetchImpl: async () => { throw new Error("boom"); } });
-  assert.equal(zh, null);
-  const zh2 = await fetchTranslated("two-sum", { fetchImpl: async () => ({ ok: false }) });
-  assert.equal(zh2, null);
-  const zh3 = await fetchTranslated("two-sum", {
-    fetchImpl: async () => ({ ok: true, json: async () => ({ data: { question: { translatedTitle: "两数之和", translatedContent: "<p>x</p>" } } }) }),
-  });
-  assert.deepEqual(zh3, { title: "两数之和", content: "<p>x</p>" });
-});
-
 test("cmdShow 缺少 questionId 时报错", async () => {
   await assert.rejects(
     cmdShow({ positionals: ["two-sum"], flags: {} }, {
       cwd: tmp(), session: "", out: () => {},
-      fetchTranslated: async () => null,
-      callTool: async () => ({ problem: { content: "<p>x</p>", codeSnippets: [] } }),
+        callTool: async () => ({ problem: { content: "<p>x</p>", codeSnippets: [] } }),
     }),
     /未返回 questionId/
   );
@@ -1201,7 +1171,7 @@ test("cmdRun 未登录报错，已登录调用 run_code 且省略 dataInput", as
   assert.equal(captured[0].args.dataInput, undefined);
 });
 
-test("cmdRun 遇到 {raw} 时原样打印文本", async () => {
+test("cmdRun 判题结果尚未就绪时如实提示而不误报为失败", async () => {
   const cwd = tmp();
   const dir = join(cwd, "solutions", "0001-two-sum", "python3");
   mkdirSync(dir, { recursive: true });
@@ -1209,9 +1179,9 @@ test("cmdRun 遇到 {raw} 时原样打印文本", async () => {
   const out = [];
   await cmdRun(
     { positionals: ["two-sum"], flags: {} },
-    { cwd, session: "s", out: (s) => out.push(s), callTool: async () => ({ raw: "Error: 未通过" }) }
+    { cwd, session: "s", out: (s) => out.push(s), callTool: async () => ({}) }
   );
-  assert.equal(out.at(-1), "Error: 未通过");
+  assert.match(out.at(-1), /未取到判题结果/);
 });
 
 test("cmdRun --input 传入 dataInput", async () => {
