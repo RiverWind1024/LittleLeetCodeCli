@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
+import { submissionStatusLabel, formatTimestamp } from "../bin/render.js";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -221,4 +222,30 @@ test("fetchSubmissionDetail 查不到时返回 null", async () => {
   const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ data: { detail: null } }) });
   const d = await fetchSubmissionDetail("1", { session: "T", fetchImpl: fakeFetch });
   assert.equal(d, null);
+});
+
+test("submissionStatusLabel 映射已知状态", () => {
+  assert.deepEqual(submissionStatusLabel("AC"), { cn: "通过", en: "Accepted", color: "green" });
+  assert.equal(submissionStatusLabel("WA").color, "red");
+  assert.equal(submissionStatusLabel("TLE").color, "yellow");
+  assert.equal(submissionStatusLabel("RE").cn, "运行错误");
+});
+
+test("submissionStatusLabel 未知状态原样返回且为 dim", () => {
+  const r = submissionStatusLabel("XX");
+  assert.equal(r.cn, "XX");
+  assert.equal(r.en, "XX");
+  assert.equal(r.color, "dim");
+});
+
+test("formatTimestamp 秒级时间戳转本地时间", () => {
+  const out = formatTimestamp("1791886149");
+  assert.match(out, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  const d = new Date(1791886149 * 1000);
+  assert.ok(out.startsWith(String(d.getFullYear())));
+});
+
+test("formatTimestamp 非法值原样返回", () => {
+  assert.equal(formatTimestamp(""), "");
+  assert.equal(formatTimestamp("abc"), "abc");
 });

@@ -106,3 +106,29 @@ export function difficultyLabel(difficulty) {
   if (DIFFICULTY[key]) return DIFFICULTY[key];
   return { cn: String(difficulty ?? "未知"), en: String(difficulty ?? "UNKNOWN"), color: "dim" };
 }
+
+// 提交判定的状态枚举（leetcode.cn 的 status 字段）
+const SUBMISSION_STATUS = {
+  AC:  { cn: "通过",     en: "Accepted",              color: "green" },
+  WA:  { cn: "答案错误", en: "Wrong Answer",          color: "red" },
+  TLE: { cn: "超时",     en: "Time Limit Exceeded",   color: "yellow" },
+  MLE: { cn: "内存超限", en: "Memory Limit Exceeded", color: "yellow" },
+  RE:  { cn: "运行错误", en: "Runtime Error",         color: "red" },
+  CE:  { cn: "编译错误", en: "Compile Error",         color: "red" },
+  SE:  { cn: "系统错误", en: "System Error",          color: "red" },
+};
+
+export function submissionStatusLabel(status) {
+  const key = String(status ?? "").toUpperCase();
+  if (SUBMISSION_STATUS[key]) return SUBMISSION_STATUS[key];
+  return { cn: String(status ?? ""), en: String(status ?? ""), color: "dim" };
+}
+
+// 秒级 Unix 时间戳 → 本地时间 "YYYY-MM-DD HH:MM:SS"
+export function formatTimestamp(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return String(ts ?? "");
+  const d = new Date(n * 1000);
+  const p = (v) => String(v).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
