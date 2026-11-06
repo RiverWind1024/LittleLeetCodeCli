@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
 import { submissionStatusLabel, formatTimestamp, renderHistoryTable, renderSubmissionDetail } from "../bin/render.js";
+import { createStyle } from "../bin/utils.js";
 import { cmdHistory, main } from "../bin/lc.mjs";
 
 const fakeRoot = () => {
@@ -278,9 +279,11 @@ const HISTORY_ROW = {
 
 test("renderHistoryTable 中文表头与内容", () => {
   const out = renderHistoryTable([HISTORY_ROW], { zh: true });
-  for (const h of ["提交时间", "状态", "语言", "耗时", "内存", "击败%", "用例", "ID"]) {
-    assert.ok(out.includes(h), `缺少表头 ${h}`);
-  }
+  const headerLine = out.split("\n").find((l) => l.includes("│"));
+  assert.deepEqual(
+    headerLine.split("│").map((s) => s.trim()).slice(1, -1),
+    ["提交时间", "状态", "语言", "耗时", "内存", "击败%", "用例", "ID"],
+  );
   assert.ok(out.includes("通过"));
   assert.ok(out.includes("Python3"));
   assert.ok(out.includes("3 ms"));
@@ -292,10 +295,38 @@ test("renderHistoryTable 中文表头与内容", () => {
 
 test("renderHistoryTable 英文表头", () => {
   const out = renderHistoryTable([HISTORY_ROW], { zh: false });
-  for (const h of ["TIME", "STATUS", "LANG", "RUNTIME", "MEMORY", "BEAT %", "CASES", "ID"]) {
-    assert.ok(out.includes(h), `缺少表头 ${h}`);
-  }
+  const headerLine = out.split("\n").find((l) => l.includes("│"));
+  // 用单元格拆分而非 includes，避免 "RUNTIME" 里的 "TIME" 子串造成假阳性
+  assert.deepEqual(
+    headerLine.split("│").map((s) => s.trim()).slice(1, -1),
+    ["TIME", "STATUS", "LANG", "RUNTIME", "MEMORY", "BEAT %", "CASES", "ID"],
+  );
   assert.ok(out.includes("Accepted"));
+});
+
+test("renderHistoryTable 状态列的标记与颜色", () => {
+  const st = createStyle(true);
+  const out = renderHistoryTable(
+    [
+      { ...HISTORY_ROW, status: "AC" },
+      { ...HISTORY_ROW, status: "WA" },
+      { ...HISTORY_ROW, status: "TLE" },
+      { ...HISTORY_ROW, status: "RE" },
+    ],
+    { style: st, zh: true },
+  );
+  assert.match(out, /\u001b\[32m✓ 通过\u001b\[0m/);   // AC → 绿色 ✓
+  assert.match(out, /\u001b\[31m✗ 答案错误\u001b\[0m/); // WA → 红色 ✗
+  assert.match(out, /\u001b\[33m✗ 超时\u001b\[0m/);     // TLE → 黄色 ✗
+  assert.match(out, /\u001b\[31m✗ 运行错误\u001b\[0m/); // RE → 红色 ✗
+});
+
+test("renderHistoryTable 未知状态原样显示且不画标记", () => {
+  const st = createStyle(true);
+  const out = renderHistoryTable([{ ...HISTORY_ROW, status: "XX" }], { style: st, zh: true });
+  assert.match(out, /\u001b\[2mXX\u001b\[0m/);
+  assert.ok(!out.includes("✓"));
+  assert.ok(!out.includes("✗"));
 });
 
 test("renderHistoryTable 击败%为 0 时显示占位符", () => {
