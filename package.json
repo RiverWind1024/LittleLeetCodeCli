@@ -8,8 +8,5 @@
   "scripts": {
     "lc": "node bin/lc.mjs",
     "test": "node --test \"test/*.test.mjs\""
-  },
-  "devDependencies": {
-    "@jinzcdev/leetcode-mcp-server": "^1.4.0"
   }
 }
