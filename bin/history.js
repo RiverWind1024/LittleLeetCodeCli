@@ -106,3 +106,74 @@ export async function fetchSubmissionStats(ids, { session = "", fetchImpl = fetc
   });
   return stats;
 }
+
+// outputDetail 是 SubmissionNode 的字段，不是 SubmissionDetail 的直接字段，
+// 必须通过 inline fragment 才能取到（否则接口报 Cannot query field "outputDetail"）。
+const SUBMISSION_DETAIL_QUERY = `query submissionDetails($submissionId: ID!) {
+  detail: submissionDetail(submissionId: $submissionId) {
+    id
+    code
+    timestamp
+    statusDisplay
+    isMine
+    runtime
+    memory
+    runtimePercentile
+    memoryPercentile
+    passedTestCaseCnt
+    totalTestCaseCnt
+    lang
+    langVerboseName
+    question {
+      questionId
+      titleSlug
+    }
+    ... on GeneralSubmissionNode {
+      outputDetail {
+        codeOutput
+        expectedOutput
+        input
+        compileError
+        runtimeError
+        lastTestcase
+      }
+    }
+    ... on ContestSubmissionNode {
+      outputDetail {
+        codeOutput
+        expectedOutput
+        input
+        compileError
+        runtimeError
+        lastTestcase
+      }
+    }
+  }
+}`;
+
+export async function fetchSubmissionDetail(id, { session = "", fetchImpl = fetch, timeoutMs = 20000 } = {}) {
+  const data = await lcGraphql(
+    SUBMISSION_DETAIL_QUERY,
+    { submissionId: String(id) },
+    { fetchImpl, session, timeoutMs },
+  );
+  const d = data?.detail;
+  if (!d) return null;
+  return {
+    id: String(d.id ?? id),
+    code: d.code ?? "",
+    timestamp: d.timestamp ?? "",
+    statusDisplay: d.statusDisplay ?? "",
+    isMine: d.isMine ?? false,
+    runtime: d.runtime ?? "",
+    memory: d.memory ?? "",
+    runtimePercentile: typeof d.runtimePercentile === "number" ? d.runtimePercentile : null,
+    memoryPercentile: typeof d.memoryPercentile === "number" ? d.memoryPercentile : null,
+    passedTestCaseCnt: d.passedTestCaseCnt ?? null,
+    totalTestCaseCnt: d.totalTestCaseCnt ?? null,
+    lang: d.lang ?? "",
+    langName: d.langVerboseName ?? d.lang ?? "",
+    question: d.question ?? null,
+    outputDetail: d.outputDetail ?? null,
+  };
+}

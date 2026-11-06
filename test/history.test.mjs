@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lcGraphql, fetchSubmissionList, fetchSubmissionStats } from "../bin/history.js";
+import { lcGraphql, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail } from "../bin/history.js";
 
 test("lcGraphql 带上 LEETCODE_SESSION cookie 并返回 data", async () => {
   const captured = {};
@@ -168,4 +168,57 @@ test("fetchSubmissionStats 空 id 列表不发请求", async () => {
   const stats = await fetchSubmissionStats([], { session: "T", fetchImpl: fakeFetch });
   assert.equal(called, false);
   assert.equal(stats.size, 0);
+});
+
+test("fetchSubmissionDetail 返回源码与失败诊断", async () => {
+  const captured = {};
+  const fakeFetch = async (url, init) => {
+    captured.body = JSON.parse(init.body);
+    return {
+      ok: true, status: 200,
+      json: async () => ({
+        data: {
+          detail: {
+            id: "754578653",
+            code: "class Solution:\n    pass\n",
+            timestamp: 1791886149,
+            statusDisplay: "Accepted",
+            isMine: true,
+            runtime: "3 ms",
+            memory: "20.3 MB",
+            runtimePercentile: 51.66,
+            memoryPercentile: 40.87,
+            passedTestCaseCnt: 65,
+            totalTestCaseCnt: 65,
+            lang: "python3",
+            langVerboseName: "Python3",
+            question: { questionId: "1", titleSlug: "two-sum" },
+            outputDetail: {
+              codeOutput: "", expectedOutput: "", input: "",
+              compileError: "", runtimeError: "", lastTestcase: "",
+            },
+          },
+        },
+      }),
+    };
+  };
+  const d = await fetchSubmissionDetail("754578653", { session: "T", fetchImpl: fakeFetch });
+  assert.equal(captured.body.variables.submissionId, "754578653");
+  assert.ok(captured.body.query.includes("code"));
+  // outputDetail 是 SubmissionNode 的字段，必须用 inline fragment 才能取到
+  assert.ok(captured.body.query.includes("... on GeneralSubmissionNode"));
+  assert.equal(d.id, "754578653");
+  assert.equal(d.code, "class Solution:\n    pass\n");
+  assert.equal(d.statusDisplay, "Accepted");
+  assert.equal(d.runtimePercentile, 51.66);
+  assert.equal(d.passedTestCaseCnt, 65);
+  assert.equal(d.langName, "Python3");
+  assert.equal(d.question.titleSlug, "two-sum");
+  assert.equal(d.outputDetail.runtimeError, "");
+});
+
+test("fetchSubmissionDetail 查不到时返回 null", async () => {
+  const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ data: { detail: null } }) });
+  const d = await fetchSubmissionDetail("1", { session: "T", fetchImpl: fakeFetch });
+  assert.equal(d, null);
 });
