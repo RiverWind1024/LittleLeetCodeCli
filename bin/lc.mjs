@@ -661,7 +661,8 @@ const meaningful = (v) =>
 
 function pickFailure(c) {
   if (c.last_testcase) {
-    return { input: c.last_testcase, expected: c.expected_output, actual: c.code_output };
+    // std_output 可能是空字符串（非 null），故用 || 而非 ?? 回退到 code_output
+    return { input: c.last_testcase, expected: c.expected_output, actual: c.std_output || c.code_output };
   }
   const got = c.std_output_list;
   const exp = c.expected_std_output_list;
