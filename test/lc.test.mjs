@@ -1234,6 +1234,73 @@ test("cmdSubmit 调用 submit_solution", async () => {
   assert.equal(captured[0].args.titleSlug, "two-sum");
 });
 
+test("cmdSubmit 通过后自动刷新已解决缓存", async () => {
+  const cwd = tmp();
+  const dir = join(cwd, "solutions", "0001-two-sum", "python3");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "solution.py"), "print(1)");
+  const names = [];
+  await cmdSubmit(
+    { positionals: ["two-sum"], flags: {} },
+    {
+      cwd, session: "s", out: () => {},
+      callTool: async (name) => {
+        names.push(name);
+        if (name === "submit_solution") {
+          return { check: { status_msg: "Accepted", correct_answer: true } };
+        }
+        return { questions: { totalNum: 1, questions: [PQ("two-sum", "2026-01-01")] } };
+      },
+    }
+  );
+  assert.deepEqual(names, ["submit_solution", "get_problem_progress"]);
+  const cache = JSON.parse(readFileSync(join(cwd, ".lc-cache", "solved.json"), "utf8"));
+  assert.deepEqual(cache.solved.map((s) => s.slug), ["two-sum"]);
+});
+
+test("cmdSubmit 未通过时不刷新已解决缓存", async () => {
+  const cwd = tmp();
+  const dir = join(cwd, "solutions", "0001-two-sum", "python3");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "solution.py"), "print(1)");
+  const names = [];
+  await cmdSubmit(
+    { positionals: ["two-sum"], flags: {} },
+    {
+      cwd, session: "s", out: () => {}, setExitCode: () => {},
+      callTool: async (name) => {
+        names.push(name);
+        return name === "submit_solution"
+          ? { check: { status_msg: "Wrong Answer", correct_answer: false } }
+          : { questions: { totalNum: 1, questions: [] } };
+      },
+    }
+  );
+  assert.deepEqual(names, ["submit_solution"]);
+  assert.equal(existsSync(join(cwd, ".lc-cache", "solved.json")), false);
+});
+
+test("cmdSubmit 刷新失败时告警但不影响提交结果", async () => {
+  const cwd = tmp();
+  const dir = join(cwd, "solutions", "0001-two-sum", "python3");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "solution.py"), "print(1)");
+  const warns = [];
+  await cmdSubmit(
+    { positionals: ["two-sum"], flags: {} },
+    {
+      cwd, session: "s", out: () => {}, warn: (s) => warns.push(s),
+      callTool: async (name) => {
+        if (name === "submit_solution") {
+          return { check: { status_msg: "Accepted", correct_answer: true } };
+        }
+        throw new Error("boom");
+      },
+    }
+  );
+  assert.match(warns.join("\n"), /已解决缓存刷新失败.*boom/);
+});
+
 test("main 未登录时 list 仍可调用", async () => {
   const cwd = fakeRoot();
   const out = [];

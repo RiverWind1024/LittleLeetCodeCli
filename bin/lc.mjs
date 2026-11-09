@@ -685,7 +685,10 @@ export async function cmdRun(opts, deps) {
 }
 
 export async function cmdSubmit(opts, deps) {
-  const { callTool: call = callTool, cwd, session = "", out = console.log, style: st = style, setExitCode } = deps;
+  const {
+    callTool: call = callTool, cwd, session = "", out = console.log,
+    warn = (s) => console.error(s), style: st = style, setExitCode, now,
+  } = deps;
   const slug = opts.positionals[0];
   if (!slug) throw new Error("用法：lc submit <slug> [--lang L] [--timeout ms]");
   requireSession(session);
@@ -699,6 +702,15 @@ export async function cmdSubmit(opts, deps) {
     timeoutMs,
   }, { session, cwd, timeoutMs: timeoutMs + 5000 });
   emit(out, data, st, setExitCode);
+
+  // 通过后自动刷新已解决缓存，避免紧接着 lc list 仍命中 24h 旧缓存
+  if (verdictOk(data)) {
+    try {
+      await loadSolved({ cwd, session, refresh: true, callTool: call, now });
+    } catch (e) {
+      warn(`提示：已解决缓存刷新失败（${e.message}），可稍后运行 lc list --refresh`);
+    }
+  }
 }
 
 export async function cmdHistory(opts, deps) {
