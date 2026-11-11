@@ -98,6 +98,24 @@ test("searchProblems 接口无数据时返回空列表而非抛错", async () =>
   assert.deepEqual(out, { hasMore: false, total: 0, questions: [] });
 });
 
+test("searchProblems 归一化题目字段并保留 paidOnly", async () => {
+  const fakeFetch = async () => gqlResp({
+    problemsetQuestionList: {
+      hasMore: true, total: 2,
+      questions: [
+        { titleSlug: "kill-process", paidOnly: true, topicTags: [{ slug: "tree" }] },
+        { titleSlug: "combine-two-tables", topicTags: [{ slug: "database" }] },
+      ],
+    },
+  });
+  const out = await searchProblems({}, { fetchImpl: fakeFetch });
+  assert.equal(out.total, 2);
+  assert.equal(out.questions[0].paidOnly, true);
+  assert.deepEqual(out.questions[0].topicTags, ["tree"]);
+  assert.equal(out.questions[1].paidOnly, false);
+  assert.deepEqual(out.questions[1].topicTags, ["database"]);
+});
+
 /* --------------------------- 题目详情 --------------------------- */
 
 test("fetchProblem 归一化标签与代码模板", async () => {

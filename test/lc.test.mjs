@@ -46,6 +46,7 @@ import {
 import {
   renderList,
   resolveTitle,
+  questionType,
   renderProgressSummary,
   renderSolvedTable,
 } from "../bin/render.js";
@@ -299,6 +300,28 @@ test("renderList 提供 solved 集合时显示状态列，否则不显示", () =
   assert.doesNotMatch(unsolved, /✓/);
   const without = renderList([row], { zh: false });
   assert.doesNotMatch(without, /STATUS/);
+});
+
+test("questionType 区分算法/SQL/Shell/并发与会员题", () => {
+  assert.deepEqual(questionType({ topicTags: ["array"] }, true), { label: "算法", color: null });
+  assert.deepEqual(questionType({ topicTags: ["database"] }, true), { label: "SQL", color: "cyan" });
+  assert.deepEqual(questionType({ topicTags: ["shell"] }, false), { label: "SHELL", color: "cyan" });
+  assert.deepEqual(questionType({ topicTags: ["concurrency"] }, true), { label: "并发", color: "yellow" });
+  assert.deepEqual(questionType({ topicTags: ["database"], paidOnly: true }, true), { label: "SQL·会员", color: "cyan" });
+  assert.deepEqual(questionType({ topicTags: ["array"], paidOnly: true }, false), { label: "ALGO·PREMIUM", color: null });
+});
+
+test("renderList 显示类型列，SQL 题与算法题可区分", () => {
+  const rows = [
+    { difficulty: "EASY", title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum", topicTags: ["array"] },
+    { difficulty: "EASY", title: "Combine Two Tables", titleCn: "组合两个表", titleSlug: "combine-two-tables", topicTags: ["database"] },
+    { difficulty: "MEDIUM", title: "Kill Process", titleCn: "杀掉进程", titleSlug: "kill-process", topicTags: ["tree"], paidOnly: true },
+  ];
+  const out = renderList(rows, { zh: true });
+  assert.match(out, /类型/);
+  assert.match(out, /算法/);
+  assert.match(out, /SQL/);
+  assert.match(out, /算法·会员/);
 });
 
 test("normalizeDifficulty 归一化并校验", () => {

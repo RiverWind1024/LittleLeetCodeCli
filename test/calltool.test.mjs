@@ -32,7 +32,7 @@ test("callTool search_problems 返回 filters/pagination/problems 结构", async
   assert.equal(out.problems.total, 2);
   assert.equal(out.problems.hasMore, true);
   assert.deepEqual(out.problems.questions[0], {
-    title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum", difficulty: "EASY", acRate: 0.5, topicTags: ["array"],
+    title: "Two Sum", titleCn: "两数之和", titleSlug: "two-sum", difficulty: "EASY", acRate: 0.5, paidOnly: false, topicTags: ["array"],
   });
   // topicTags 归一化成 slug 字符串数组
   assert.deepEqual(out.problems.questions[1].topicTags, []);

@@ -8,6 +8,7 @@ const DIFFICULTY = {
 
 const LIST_TABLE_HEADER_ZH = {
   DIFFICULTY: "难度",
+  TYPE: "类型",
   STATUS: "状态",
   SLUG: "题号",
   TITLE: "标题",
@@ -17,6 +18,7 @@ const LIST_TABLE_HEADER_ZH = {
 
 const LIST_TABLE_HEADER_EN = {
   DIFFICULTY: "DIFFICULTY",
+  TYPE: "TYPE",
   STATUS: "STATUS",
   SLUG: "SLUG",
   TITLE: "TITLE",
@@ -28,6 +30,17 @@ export function resolveTitle(q, zh) {
   const a = zh ? q?.titleCn : q?.title;
   const b = zh ? q?.title : q?.titleCn;
   return a || b || q?.titleSlug || "";
+}
+
+// 题目类型：SQL / Shell / 并发属于非算法题，会员题单独标注
+export function questionType(q, zh = true) {
+  const tags = Array.isArray(q?.topicTags) ? q.topicTags : [];
+  let type = { label: zh ? "算法" : "ALGO", color: null };
+  if (tags.includes("database")) type = { label: "SQL", color: "cyan" };
+  else if (tags.includes("shell")) type = { label: zh ? "Shell" : "SHELL", color: "cyan" };
+  else if (tags.includes("concurrency")) type = { label: zh ? "并发" : "CONC", color: "yellow" };
+  if (q?.paidOnly) type = { label: `${type.label}${zh ? "·会员" : "·PREMIUM"}`, color: type.color };
+  return type;
 }
 
 export function renderTable(header, rows, { style: st = style } = {}) {
@@ -51,12 +64,16 @@ export function renderList(questions, { style: st = style, zh = isChineseEnv(), 
   if (!questions || questions.length === 0) return zh ? "无匹配题目" : "No matching problems";
   const header_dict = zh ? LIST_TABLE_HEADER_ZH : LIST_TABLE_HEADER_EN;
   const header = solved
-    ? [header_dict.DIFFICULTY, header_dict.STATUS, header_dict.TITLE, header_dict.SLUG]
-    : [header_dict.DIFFICULTY, header_dict.TITLE, header_dict.SLUG];
+    ? [header_dict.DIFFICULTY, header_dict.TYPE, header_dict.STATUS, header_dict.TITLE, header_dict.SLUG]
+    : [header_dict.DIFFICULTY, header_dict.TYPE, header_dict.TITLE, header_dict.SLUG];
   const rows = questions.map((q) => {
     const d = difficultyLabel(q.difficulty);
     const d_tag = zh ? d.cn : d.en;
-    const cells = [{ plain: d_tag, styled: st[d.color](d_tag) }];
+    const t = questionType(q, zh);
+    const cells = [
+      { plain: d_tag, styled: st[d.color](d_tag) },
+      { plain: t.label, styled: t.color ? st[t.color](t.label) : t.label },
+    ];
     if (solved) {
       cells.push(solved.has(q.titleSlug)
         ? { plain: "✓", styled: st.green("✓") }

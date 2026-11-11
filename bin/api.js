@@ -83,6 +83,7 @@ const SEARCH_PROBLEMS_QUERY = `query problemsetQuestionList(
       titleSlug
       difficulty
       acRate
+      paidOnly
       topicTags { slug }
     }
   }
@@ -112,6 +113,7 @@ export async function searchProblems(
       titleSlug: q?.titleSlug ?? "",
       difficulty: q?.difficulty ?? "",
       acRate: q?.acRate ?? null,
+      paidOnly: q?.paidOnly === true,
       topicTags: (q?.topicTags ?? []).map((t) => t?.slug).filter(Boolean),
     })),
   };

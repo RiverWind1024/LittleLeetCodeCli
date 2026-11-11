@@ -108,7 +108,7 @@ LEETCODE_SESSION=<值> lc submit two-sum
 |---|---|
 | `init` | 未配置 Cookie 时交互引导写入（零依赖，无需安装任何包） |
 | `config <get\|set\|unset\|list> [key] [value]` | 管理 `.env`（`session` 登录 Cookie、`lang` 默认语言、`locale` 显示语言 zh/en/auto） |
-| `list [关键词]` | 搜索题目，输出带边框表格；登录后含已解决状态列 |
+| `list [关键词]` | 搜索题目，输出带边框表格；登录后含已解决状态列，并用类型列区分算法/SQL/Shell/并发/会员题 |
 | `random` | 随机抽取一题（只打印，不生成文件） |
 | `progress` | 已解决题目的统计与列表（需登录）；已解决列表缓存在 `.lc-cache/` |
 | `show <slug>` | 取题目、生成代码文件、按 locale 打印中/英题面 |
@@ -192,6 +192,7 @@ solutions/
   遵循 `NO_COLOR`（设置即禁用）与 `FORCE_COLOR`（非 `0` 即强制启用）约定。
 - **难度配色**：简单=绿、中等=黄、困难=红；列宽按显示宽度计算，中文占 2 列。
 - **状态列**：登录后 `list` 每行显示状态列，已解决标绿色 ✅；未登录时不显示该列。
+- **类型列**：`list` 按题目标签区分类型：`SQL`（database）、`Shell`、`并发`（concurrency），其余为 `算法`；会员题追加 `·会员`（如 `算法·会员`）。
 - **显示语言**：命令输出与帮助文本按 locale 自动中英切换；优先级 `lc config locale`（写入 `.env` 的 `LC_LOCALE`）> 系统 `LC_ALL`/`LANG`（以 `zh` 开头即中文）。`locale` 设为 `auto`（默认）时跟随系统。
 - **已解决缓存**：`progress` 与 `list` 把已解决列表缓存到 `.lc-cache/solved.json`（24 小时），
   `submit` 判题通过后会自动刷新该缓存；刷新失败时静默降级用旧缓存并在 stderr 告警。
@@ -207,7 +208,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 164 个单元/集成测试（node:test）
+npm test           # 167 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：所有 LeetCode 请求都通过注入的假 `fetch` 验证，因此可离线跑。
