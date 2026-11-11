@@ -192,7 +192,7 @@ solutions/
   遵循 `NO_COLOR`（设置即禁用）与 `FORCE_COLOR`（非 `0` 即强制启用）约定。
 - **难度配色**：简单=绿、中等=黄、困难=红；列宽按显示宽度计算，中文占 2 列。
 - **状态列**：登录后 `list` 每行显示状态列，已解决标绿色 ✅；未登录时不显示该列。
-- **类型列**：`list` 按题目标签区分类型：`SQL`（database）、`Shell`、`并发`（concurrency），其余为 `算法`；会员题追加 `·会员`（如 `算法·会员`）。
+- **类型列**：`list` 按题目标签区分类型：`SQL`（database）、`Shell`、`并发`（concurrency），其余为 `算法`；会员题追加黄色的 `·会员`（如 `SQL·会员`）。
 - **显示语言**：命令输出与帮助文本按 locale 自动中英切换；优先级 `lc config locale`（写入 `.env` 的 `LC_LOCALE`）> 系统 `LC_ALL`/`LANG`（以 `zh` 开头即中文）。`locale` 设为 `auto`（默认）时跟随系统。
 - **已解决缓存**：`progress` 与 `list` 把已解决列表缓存到 `.lc-cache/solved.json`（24 小时），
   `submit` 判题通过后会自动刷新该缓存；刷新失败时静默降级用旧缓存并在 stderr 告警。
@@ -208,7 +208,7 @@ solutions/
 ## 开发
 
 ```bash
-npm test           # 167 个单元/集成测试（node:test）
+npm test           # 168 个单元/集成测试（node:test）
 ```
 
 测试不依赖网络：所有 LeetCode 请求都通过注入的假 `fetch` 验证，因此可离线跑。

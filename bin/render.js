@@ -32,15 +32,14 @@ export function resolveTitle(q, zh) {
   return a || b || q?.titleSlug || "";
 }
 
-// 题目类型：SQL / Shell / 并发属于非算法题，会员题单独标注
+// 题目类型：SQL / Shell / 并发属于非算法题；会员题由调用方追加黄色标记
 export function questionType(q, zh = true) {
   const tags = Array.isArray(q?.topicTags) ? q.topicTags : [];
-  let type = { label: zh ? "算法" : "ALGO", color: null };
-  if (tags.includes("database")) type = { label: "SQL", color: "cyan" };
-  else if (tags.includes("shell")) type = { label: zh ? "Shell" : "SHELL", color: "cyan" };
-  else if (tags.includes("concurrency")) type = { label: zh ? "并发" : "CONC", color: "yellow" };
-  if (q?.paidOnly) type = { label: `${type.label}${zh ? "·会员" : "·PREMIUM"}`, color: type.color };
-  return type;
+  const paid = q?.paidOnly === true;
+  if (tags.includes("database")) return { label: "SQL", color: "cyan", paid };
+  if (tags.includes("shell")) return { label: zh ? "Shell" : "SHELL", color: "cyan", paid };
+  if (tags.includes("concurrency")) return { label: zh ? "并发" : "CONC", color: "yellow", paid };
+  return { label: zh ? "算法" : "ALGO", color: null, paid };
 }
 
 export function renderTable(header, rows, { style: st = style } = {}) {
@@ -70,9 +69,12 @@ export function renderList(questions, { style: st = style, zh = isChineseEnv(), 
     const d = difficultyLabel(q.difficulty);
     const d_tag = zh ? d.cn : d.en;
     const t = questionType(q, zh);
+    const paint = (s) => (t.color ? st[t.color](s) : s);
+    const suffix = t.paid ? (zh ? "·会员" : "·PREMIUM") : "";
+    const typeLabel = t.label + suffix;
     const cells = [
       { plain: d_tag, styled: st[d.color](d_tag) },
-      { plain: t.label, styled: t.color ? st[t.color](t.label) : t.label },
+      { plain: typeLabel, styled: paint(t.label) + (suffix ? st.yellow(suffix) : "") },
     ];
     if (solved) {
       cells.push(solved.has(q.titleSlug)

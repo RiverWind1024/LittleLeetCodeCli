@@ -303,12 +303,22 @@ test("renderList 提供 solved 集合时显示状态列，否则不显示", () =
 });
 
 test("questionType 区分算法/SQL/Shell/并发与会员题", () => {
-  assert.deepEqual(questionType({ topicTags: ["array"] }, true), { label: "算法", color: null });
-  assert.deepEqual(questionType({ topicTags: ["database"] }, true), { label: "SQL", color: "cyan" });
-  assert.deepEqual(questionType({ topicTags: ["shell"] }, false), { label: "SHELL", color: "cyan" });
-  assert.deepEqual(questionType({ topicTags: ["concurrency"] }, true), { label: "并发", color: "yellow" });
-  assert.deepEqual(questionType({ topicTags: ["database"], paidOnly: true }, true), { label: "SQL·会员", color: "cyan" });
-  assert.deepEqual(questionType({ topicTags: ["array"], paidOnly: true }, false), { label: "ALGO·PREMIUM", color: null });
+  assert.deepEqual(questionType({ topicTags: ["array"] }, true), { label: "算法", color: null, paid: false });
+  assert.deepEqual(questionType({ topicTags: ["database"] }, true), { label: "SQL", color: "cyan", paid: false });
+  assert.deepEqual(questionType({ topicTags: ["shell"] }, false), { label: "SHELL", color: "cyan", paid: false });
+  assert.deepEqual(questionType({ topicTags: ["concurrency"] }, true), { label: "并发", color: "yellow", paid: false });
+  assert.deepEqual(questionType({ topicTags: ["database"], paidOnly: true }, true), { label: "SQL", color: "cyan", paid: true });
+  assert.deepEqual(questionType({ topicTags: ["array"], paidOnly: true }, false), { label: "ALGO", color: null, paid: true });
+});
+
+test("renderList 把会员标记渲染为黄色，类型本身保持原色", () => {
+  const st = createStyle(true);
+  const out = renderList(
+    [{ difficulty: "EASY", title: "X", titleSlug: "x", topicTags: ["database"], paidOnly: true }],
+    { zh: true, style: st },
+  );
+  assert.match(out, /\u001b\[36mSQL\u001b\[0m/);
+  assert.match(out, /\u001b\[33m·会员\u001b\[0m/);
 });
 
 test("renderList 显示类型列，SQL 题与算法题可区分", () => {
