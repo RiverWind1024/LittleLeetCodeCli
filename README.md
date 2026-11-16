@@ -246,9 +246,7 @@ VS Code 用户还可以在 `.vscode/mcp.json` 里挂 [leetcode-mcp-server](https
 `lc` 直接访问 leetcode.cn 的公开接口：题目与搜索用 GraphQL，运行与提交用官方判题 REST 接口
 （判题接口未提供 GraphQL mutation，只能轮询 `/check/`）。接口实现参考了
 **[leetcode-mcp-server](https://github.com/jinzcdev/leetcode-mcp-server)**（作者 [@jinzcdev](https://github.com/jinzcdev)，npm [`@jinzcdev/leetcode-mcp-server`](https://www.npmjs.com/package/@jinzcdev/leetcode-mcp-server)）
-的实现思路，感谢作者的开源与维护。
-
-同时也对 LeetCode 官方 MCP Server 的提供方致谢——它让 AI 助手也能用上这套接口。
+的思路，感谢作者的开源与维护。
 
 同时感谢 LeetCode 提供的平台，以及所有开源社区的贡献者。
 
