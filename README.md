@@ -55,6 +55,10 @@ lc run two-sum       # 用默认样例跑一遍
 lc submit two-sum    # 提交
 ```
 
+![lc list 输出示例：带难度配色、类型列、已解决状态列与题号表格](assets/lc-list-example.png)
+
+> 示例：`lc list` 的搜索结果为表格，登录后含 ✅ 已解决状态列；实际输出随版本变化。
+
 > **命令受项目根目录约束。** 无论怎么调用，`lc` 都会校验当前目录是不是 LittleLeetCodeCli
 > 项目根目录，否则报错退出——不会在别处误建 `solutions/` 或误读 `.env`。
 > 不想用 `npm link` 也可以直接 `node bin/lc.mjs <命令>`，
@@ -72,6 +76,13 @@ lc submit two-sum    # 提交
 1. 浏览器登录 <https://leetcode.cn>
 2. `F12` → **Application**（应用）→ **Storage → Cookies** → `https://leetcode.cn`
 3. 找到 `LEETCODE_SESSION`，复制 **Value** 列的内容
+
+不知怎么找？对照下图（以 Chrome 为例，Edge/Firefox 的菜单位置类似）：
+
+![在浏览器开发者工具中复制 LEETCODE_SESSION](assets/cookie-session.png)
+
+> 上图被选中的那一行就是 `LEETCODE_SESSION`。双击它的 **Value** 单元格即可全选复制；
+> 也可以直接在 Console 里执行 `document.cookie` 查找，或从该行右键选择复制值。
 
 ### 配置
 
