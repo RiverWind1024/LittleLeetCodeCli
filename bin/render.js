@@ -126,6 +126,186 @@ export function difficultyLabel(difficulty) {
   return { cn: String(difficulty ?? "未知"), en: String(difficulty ?? "UNKNOWN"), color: "dim" };
 }
 
+/* ============================ 题解（Markdown → 终端文本） ============================ */
+
+// 题解代码块的语言标记（```Python / ```C++ / ```golang ...）统一到 LANG_MAP 的 key
+const SOLUTION_LANG_ALIASES = {
+  python3: ["python", "python3", "py"],
+  cpp: ["c++", "cpp", "cplusplus"],
+  java: ["java"],
+  golang: ["go", "golang"],
+  javascript: ["javascript", "js"],
+  typescript: ["typescript", "ts"],
+  rust: ["rust"],
+  c: ["c"],
+  csharp: ["c#", "csharp", "cs"],
+  kotlin: ["kotlin", "kt"],
+  swift: ["swift"],
+  scala: ["scala"],
+  ruby: ["ruby"],
+  php: ["php"],
+  dart: ["dart"],
+  racket: ["racket"],
+  erlang: ["erlang"],
+  elixir: ["elixir"],
+};
+
+const SOLUTION_LANG_BY_TOKEN = new Map();
+for (const [key, aliases] of Object.entries(SOLUTION_LANG_ALIASES)) {
+  for (const a of aliases) SOLUTION_LANG_BY_TOKEN.set(a, key);
+}
+
+// 代码块信息串形如 "Python [sol1-Python3]" / "java"；只取首个 token。
+// 返回值："" 表示无语言标记，"unknown" 表示标记了但不在上表里（无法判定，按显示处理）
+export function solutionCodeLang(info) {
+  const token = String(info ?? "").trim().split(/\s+/)[0].toLowerCase();
+  if (!token) return "";
+  return SOLUTION_LANG_BY_TOKEN.get(token) ?? "unknown";
+}
+
+// 行内标记：图片 / 链接 / 粗体 / LaTeX。终端里只求可读，不追求语法还原。
+function renderInline(text) {
+  return String(text)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+      if (/^https?:\/\//i.test(url)) return `[图] ${url}`;
+      if (/\.(mp4|mov|avi|webm)$/i.test(alt) || /视频/.test(alt)) return `[视频] ${alt}`;
+      return `[附件] ${alt}`;
+    })
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, url) => (t === url ? url : `${t} (${url})`))
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\\text(?:it|bf|rm|tt)?\{([^{}]*)\}/g, "$1")
+    .replace(/\\(min|max|log|ln|exp|sin|cos|tan|sqrt)\b/g, "$1")
+    .replace(/\\le\b/g, "≤")
+    .replace(/\\ge\b/g, "≥")
+    .replace(/\\times\b/g, "×")
+    .replace(/\\cdot\b/g, "·")
+    .replace(/\$([^$]*)\$/g, "$1");
+}
+
+// 轻量 Markdown 渲染：标题去掉 # 并加粗，代码块按 lang 过滤，
+// 图片/链接转成可读文本，其余保持原样。
+export function renderMarkdown(md, { style: st = style, lang = "", zh = isChineseEnv() } = {}) {
+  const want = lang ? (SOLUTION_LANG_BY_TOKEN.get(lang) ?? lang) : "";
+  const src = String(md ?? "").replace(/\r\n?/g, "\n").replace(/<br\s*\/?>/gi, "\n");
+  const out = [];
+  let hidden = 0;
+  let inCode = false;
+  let codeLang = "";
+  let buf = [];
+
+  const blank = () => {
+    if (out.length && out[out.length - 1] !== "") out.push("");
+  };
+
+  for (const line of src.split("\n")) {
+    const fence = /^```(.*)$/.exec(line);
+    if (fence) {
+      if (!inCode) {
+        inCode = true;
+        codeLang = solutionCodeLang(fence[1]);
+        buf = [];
+      } else {
+        inCode = false;
+        // 无标记 / 未知语言 / 与 --lang 一致 的块保留，其余语言静默跳过
+        const keep = !codeLang || codeLang === "unknown" || !want || codeLang === want;
+        if (keep) {
+          blank();
+          out.push(...buf);
+          out.push("");
+        } else {
+          hidden++;
+        }
+        buf = [];
+      }
+      continue;
+    }
+    if (inCode) {
+      buf.push(line);
+      continue;
+    }
+
+    if (!line.trim()) {
+      blank();
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    if (heading) {
+      blank();
+      out.push(st.bold(renderInline(heading[2])));
+      out.push("");
+      continue;
+    }
+
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
+      blank();
+      out.push(st.dim("─".repeat(48)));
+      out.push("");
+      continue;
+    }
+
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote) {
+      out.push(st.dim("│ ") + renderInline(quote[1]));
+      continue;
+    }
+
+    out.push(renderInline(line).replace(/\s+$/, ""));
+  }
+
+  // 未闭合的代码块（极少见）也要原样吐出来
+  if (inCode && buf.length) {
+    blank();
+    out.push(...buf);
+  }
+
+  const text = out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (hidden > 0) {
+    const hint = zh
+      ? `（已隐藏 ${hidden} 个其他语言的代码块；--lang 切换语言，--raw 查看原始 Markdown）`
+      : `(${hidden} code block(s) in other languages hidden; use --lang or --raw)`;
+    return `${text}\n\n${st.dim(hint)}`;
+  }
+  return text;
+}
+
+export function renderSolutionArticle(article, { style: st = style, zh = isChineseEnv(), lang = "", titleSlug = "" } = {}) {
+  const tag = article.isOfficial ? (zh ? "官方题解" : "OFFICIAL") : (zh ? "社区题解" : "COMMUNITY");
+  const meta = [article.author, article.upvoteCount ? `👍 ${article.upvoteCount}` : "", String(article.createdAt ?? "").slice(0, 10)]
+    .filter(Boolean)
+    .join(" · ");
+  const lines = [
+    `${st.bold(article.title || article.slug)}  ${article.isOfficial ? st.yellow(tag) : st.dim(tag)}`,
+  ];
+  if (meta) lines.push(st.dim(meta));
+  if (titleSlug && article.slug) {
+    lines.push(st.dim(`https://leetcode.cn/problems/${titleSlug}/solution/${article.slug}/`));
+  }
+  lines.push(st.dim("─".repeat(48)));
+  lines.push("");
+  lines.push(renderMarkdown(article.content, { style: st, lang, zh }));
+  return lines.join("\n");
+}
+
+export function renderSolutionList(articles, { style: st = style, zh = isChineseEnv() } = {}) {
+  if (!articles || articles.length === 0) return zh ? "该题暂无题解" : "No solutions";
+  const header = zh ? ["#", "标记", "标题", "作者", "赞"] : ["#", "TAG", "TITLE", "AUTHOR", "VOTES"];
+  const rows = articles.map((a, i) => {
+    const official = a.isOfficial
+      ? { plain: zh ? "官方" : "OFFICIAL", styled: st.yellow(zh ? "官方" : "OFFICIAL") }
+      : { plain: "", styled: "" };
+    return [
+      { plain: String(i + 1), styled: st.dim(String(i + 1)) },
+      official,
+      { plain: a.title, styled: a.title },
+      { plain: a.author, styled: st.dim(a.author) },
+      { plain: String(a.upvoteCount ?? 0), styled: String(a.upvoteCount ?? 0) },
+    ];
+  });
+  return renderTable(header, rows, { style: st });
+}
+
 // 提交判定的状态枚举（leetcode.cn 的 status 字段）
 const SUBMISSION_STATUS = {
   AC:  { cn: "通过",     en: "Accepted",              color: "green" },

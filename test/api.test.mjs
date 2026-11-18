@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCookie, lcGraphql, searchProblems, fetchProblem, fetchQuestionId,
   fetchProgress, runCode, submitSolution, pollCheck,
+  fetchSolutionArticles, fetchSolutionArticle,
 } from "../bin/api.js";
 
 const gqlResp = (data, { status = 200, headers } = {}) => ({
@@ -160,6 +161,84 @@ test("fetchQuestionId 只取 questionId 字段", async () => {
   assert.equal(await fetchQuestionId("two-sum", { fetchImpl: fakeFetch }), "42");
   assert.match(body.query, /questionId/);
   assert.doesNotMatch(body.query, /codeSnippets/);
+});
+
+/* --------------------------- 题解 --------------------------- */
+
+test("fetchSolutionArticles 归一化列表并标出官方题解", async () => {
+  let body = null;
+  const fakeFetch = async (url, init) => {
+    body = JSON.parse(init.body);
+    return gqlResp({
+      questionSolutionArticles: {
+        totalNum: 2,
+        edges: [
+          { node: { slug: "a-by-leetcode-solution", title: "两数之和", articleType: "SOLUTION", upvoteCount: 4443, createdAt: "2020-10-02T15:48:59+00:00", author: { username: "LeetCode-Solution" } } },
+          { node: { slug: "b", title: "画解", articleType: "SOLUTION", upvoteCount: 18, createdAt: "2019-01-01T00:00:00+00:00", author: { username: "someone" } } },
+        ],
+      },
+    });
+  };
+  const data = await fetchSolutionArticles("two-sum", { limit: 5, offset: 2 }, { fetchImpl: fakeFetch });
+  assert.equal(data.total, 2);
+  assert.equal(data.articles.length, 2);
+  assert.equal(data.articles[0].isOfficial, true);
+  assert.equal(data.articles[1].isOfficial, false);
+  assert.equal(body.variables.questionSlug, "two-sum");
+  assert.equal(body.variables.first, 5);
+  assert.equal(body.variables.skip, 2);
+  assert.equal(body.variables.orderBy, "DEFAULT");
+  assert.match(body.query, /questionSolutionArticles/);
+});
+
+test("fetchSolutionArticles 的 LeetCode 账号也算官方（早期 SQL 题解）", async () => {
+  const fakeFetch = async () => gqlResp({
+    questionSolutionArticles: {
+      totalNum: 1,
+      edges: [{ node: { slug: "sql", title: "组合两个表", upvoteCount: 239, author: { username: "LeetCode" } } }],
+    },
+  });
+  const data = await fetchSolutionArticles("combine-two-tables", {}, { fetchImpl: fakeFetch });
+  assert.equal(data.articles[0].isOfficial, true);
+});
+
+test("fetchSolutionArticle 取正文与作者信息", async () => {
+  let body = null;
+  const fakeFetch = async (url, init) => {
+    body = JSON.parse(init.body);
+    return gqlResp({
+      solutionArticle: {
+        slug: "a-by-leetcode-solution",
+        title: "两数之和",
+        content: "### 方法一\n\n```python\nprint(1)\n```",
+        articleType: "SOLUTION",
+        upvoteCount: 4443,
+        createdAt: "2020-10-02T15:48:59+00:00",
+        author: { username: "LeetCode-Solution" },
+      },
+    });
+  };
+  const a = await fetchSolutionArticle("a-by-leetcode-solution", { fetchImpl: fakeFetch });
+  assert.equal(a.slug, "a-by-leetcode-solution");
+  assert.equal(a.isOfficial, true);
+  assert.match(a.content, /print\(1\)/);
+  assert.equal(body.variables.slug, "a-by-leetcode-solution");
+});
+
+test("fetchSolutionArticle 查不到题解时抛错", async () => {
+  const fakeFetch = async () => gqlResp({ solutionArticle: null });
+  await assert.rejects(
+    () => fetchSolutionArticle("nope", { fetchImpl: fakeFetch }),
+    /未找到题解：nope/,
+  );
+});
+
+test("fetchSolutionArticles 走 label 化的错误提示", async () => {
+  const fakeFetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+  await assert.rejects(
+    () => fetchSolutionArticles("two-sum", {}, { fetchImpl: fakeFetch }),
+    /获取题解列表失败：HTTP 500/,
+  );
 });
 
 /* --------------------------- 解题进度 --------------------------- */

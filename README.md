@@ -17,6 +17,7 @@
 - **随机刷题** — `lc random` 在筛选范围内均匀抽题
 - **已做标记** — 登录后 `list` 显示 ✅/空 状态列，`progress` 查看已解决统计与最近提交
 - **提交历史** — `lc history <slug>` 查某题的历次提交：状态、耗时、内存、击败百分位、通过用例数，`--id` 看单次源码
+- **题解** — `lc solution <slug>` 在终端读官方题解（Markdown 渲染、代码块按语言过滤），`--list` 浏览其他题解，无需登录
 - **自约束** — 命令只在项目根目录有效，不会在别处误建目录或误读凭据
 
 ## 目录
@@ -53,6 +54,7 @@ lc random            # 随机抽一题（可加 --difficulty / --tags）
 lc show two-sum      # 下载题目并生成 solution.py（题面随 locale，中文环境为中文）
 lc run two-sum       # 用默认样例跑一遍
 lc submit two-sum    # 提交
+lc solution two-sum  # 在终端读官方题解（无需登录）
 ```
 
 ![lc list 输出示例：带难度配色、类型列、已解决状态列与题号表格](assets/lc-list-example.png)
@@ -69,7 +71,7 @@ lc submit two-sum    # 提交
 ## 认证
 
 `run` 和 `submit` 需要登录，`progress` 和 `history` 同样需要；
-`list` 未登录时只不显示状态列，`show` 不需要登录。
+`list` 未登录时只不显示状态列，`show` 与 `solution` 不需要登录。
 
 ### 获取 Cookie
 
@@ -126,6 +128,7 @@ LEETCODE_SESSION=<值> lc submit two-sum
 | `run <slug>` | 用题目默认样例运行本地代码 |
 | `submit <slug>` | 提交本地代码 |
 | `history <slug>` | 查看某题的历史提交记录与得分（需登录） |
+| `solution <slug>` | 在终端查看题解：默认官方题解，`--list` 浏览列表（无需登录） |
 
 > 任何命令都可以用 `lc <命令> --help`（或 `lc help <命令>`）查看该命令的完整用法。
 
@@ -148,6 +151,25 @@ LEETCODE_SESSION=<值> lc submit two-sum
 | `--force` | `show` | 覆盖已存在的代码文件 |
 | `--input "..."` | `run` | 自定义测试输入；不给则用题目默认样例 |
 | `--id <提交ID>` | `history` | 查看单次提交的完整详情（含源码与失败诊断） |
+| `--list` | `solution` | 列出该题题解（官方置顶），表格含序号、作者、赞数 |
+| `--id <N\|题解slug>` | `solution` | 查看第 N 条题解（从 1 开始）或指定题解，如 `--id 2` |
+| `--raw` | `solution` | 输出原始 Markdown，可重定向存档：`lc solution two-sum --raw > official.md` |
+
+### 查看题解
+
+```bash
+lc solution two-sum                      # 官方题解全文（Markdown 渲染，代码块只显示 --lang 语言）
+lc solution two-sum --lang cpp           # 只看 C++ 的代码块
+lc solution two-sum --list               # 热门前 20 条题解：序号 / 官方标记 / 标题 / 作者 / 赞
+lc solution two-sum --list --limit 50    # 更多条（上限 100）
+lc solution two-sum --id 2               # 看第 2 条（也可直接给题解 slug）
+lc solution two-sum --raw > official.md  # 原始 Markdown，方便存档或用编辑器看
+```
+
+- 默认取**官方题解**（作者 `LeetCode-Solution` / `LeetCode`，接口的 DEFAULT 排序下总在首位）。
+- 终端里是轻量 Markdown 转换：标题去 `#` 加粗，`**粗体**`/`$...$` 去掉标记，图片转为 `[图] <链接>`。
+- 官方题解常并列多种语言代码块，默认只显示 `--lang`（默认取 `lc config lang`）对应语言以及无语言标记的代码块，其余隐藏并在末尾提示；未收录的语言（如 SQL）照常显示。
+- 会员题可能没有公开题解，此时会提示「该题暂无题解」；题解 slug 写错则报「未找到题目」。
 
 ### 查看提交历史
 
@@ -212,6 +234,8 @@ solutions/
 - **题面语言**：`show` 按 locale 展示中/英文标题与题面（中文取不到时回退英文），生成的文件注释同样随 locale；
   上标/下标会渲染为 `x_i^y_i` 这类纯文本，不丢数学语义。
 - **文件题面注释**：`show` 生成的文件顶部带题目注释（标题 + 完整题面，按语言用 `#` / `//`）。
+- **题解渲染**：`solution` 把题解 Markdown 转成终端文本——标题加粗、图片转 `[图] <链接>`、公式去掉 `$` 与 `\textit{}` 标记；
+  代码块只保留 `--lang` 对应语言与无语言标记的块，末尾提示隐藏数量。`--raw` 则输出未经处理的原始 Markdown。
 - 退出码：成功 `0`，出错 `1`。
 
 ---

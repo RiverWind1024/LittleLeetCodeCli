@@ -507,6 +507,98 @@ export async function submitSolution(
   return { titleSlug, questionId: qid, start, checkUrl, check };
 }
 
+/* ============================ 题解 ============================ */
+
+// 官方题解账号：新版统一为 LeetCode-Solution，早期 SQL/专题题解挂在 LeetCode 下
+const OFFICIAL_SOLUTION_AUTHORS = new Set(["LeetCode-Solution", "LeetCode"]);
+const isOfficialSolution = (username) => OFFICIAL_SOLUTION_AUTHORS.has(String(username ?? ""));
+
+const SOLUTION_ARTICLES_QUERY = `query questionSolutionArticles(
+  $questionSlug: String!
+  $first: Int
+  $skip: Int
+  $orderBy: SolutionArticleOrderBy
+) {
+  questionSolutionArticles(
+    questionSlug: $questionSlug
+    first: $first
+    skip: $skip
+    orderBy: $orderBy
+  ) {
+    totalNum
+    edges {
+      node {
+        slug
+        title
+        articleType
+        upvoteCount
+        createdAt
+        author { username }
+      }
+    }
+  }
+}`;
+
+// orderBy 只支持 DEFAULT / MOST_UPVOTE（NEWEST / OLDEST 会被接口拒绝）
+export async function fetchSolutionArticles(
+  titleSlug,
+  { limit = 20, offset = 0, orderBy = "DEFAULT" } = {},
+  { fetchImpl = fetch, session = "", timeoutMs = 20000 } = {},
+) {
+  const data = await lcGraphql(
+    SOLUTION_ARTICLES_QUERY,
+    { questionSlug: titleSlug, first: limit, skip: offset, orderBy },
+    { fetchImpl, session, timeoutMs, label: "获取题解列表失败" },
+  );
+  const conn = data?.questionSolutionArticles;
+  const articles = (conn?.edges ?? []).map((e) => {
+    const n = e?.node ?? {};
+    return {
+      slug: n.slug ?? "",
+      title: n.title ?? "",
+      articleType: n.articleType ?? "",
+      upvoteCount: n.upvoteCount ?? 0,
+      createdAt: n.createdAt ?? "",
+      author: n.author?.username ?? "",
+      isOfficial: isOfficialSolution(n.author?.username),
+    };
+  }).filter((a) => a.slug);
+  return { total: conn?.totalNum ?? articles.length, articles };
+}
+
+// 正文是 GitHub 风格 Markdown：标题 / 多语言代码块 / 图片 / LaTeX
+const SOLUTION_ARTICLE_QUERY = `query ($slug: String!) {
+  solutionArticle(slug: $slug) {
+    slug
+    title
+    content
+    articleType
+    upvoteCount
+    createdAt
+    author { username }
+  }
+}`;
+
+export async function fetchSolutionArticle(slug, { fetchImpl = fetch, session = "", timeoutMs = 20000 } = {}) {
+  const data = await lcGraphql(
+    SOLUTION_ARTICLE_QUERY,
+    { slug },
+    { fetchImpl, session, timeoutMs, label: "获取题解失败" },
+  );
+  const a = data?.solutionArticle;
+  if (!a) throw new Error(`未找到题解：${slug}`);
+  return {
+    slug: a.slug ?? slug,
+    title: a.title ?? "",
+    content: a.content ?? "",
+    articleType: a.articleType ?? "",
+    upvoteCount: a.upvoteCount ?? 0,
+    createdAt: a.createdAt ?? "",
+    author: a.author?.username ?? "",
+    isOfficial: isOfficialSolution(a.author?.username),
+  };
+}
+
 /* ============================ 统一入口 ============================ */
 
 // 保留与旧 MCP 层一致的 tool 名与返回形状，CLI 侧无需感知底层差异。
@@ -538,6 +630,10 @@ export async function callTool(name, toolArgs = {}, opts = {}) {
         questions,
       };
     }
+    case "list_problem_solutions":
+      return fetchSolutionArticles(toolArgs.titleSlug, toolArgs, { session, timeoutMs, fetchImpl });
+    case "get_problem_solution":
+      return fetchSolutionArticle(toolArgs.slug, { session, timeoutMs, fetchImpl });
     case "run_code":
       return runCode(toolArgs, { session, fetchImpl });
     case "submit_solution":

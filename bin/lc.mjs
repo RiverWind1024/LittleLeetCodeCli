@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import {
   htmlToText, strWidth, isChineseEnv, style, parseEnvContent, loadEnv, setEnvVar, unsetEnvVar, writeEnv,
 } from "./utils.js";
-import { renderProgressSummary, renderSolvedTable,renderList,renderHistoryTable,renderSubmissionDetail,difficultyLabel } from "./render.js";
+import { renderProgressSummary, renderSolvedTable,renderList,renderHistoryTable,renderSubmissionDetail,difficultyLabel,renderSolutionArticle,renderSolutionList } from "./render.js";
 import {
-  callTool, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail,
+  callTool, fetchSubmissionList, fetchSubmissionStats, fetchSubmissionDetail, fetchQuestionId,
 } from "./api.js";
 
 // 保留旧的导出路径：CLI 内部与测试都从这里取 callTool
@@ -87,6 +87,17 @@ const COMMANDS = {
       ["--limit N", { zh: "每页条数，默认 20，上限 100", en: "Rows per page, default 20, max 100" }],
       ["--offset N", { zh: "跳过前 N 条，默认 0", en: "Skip the first N rows, default 0" }],
       ["--id <提交ID>", { zh: "查看单次提交的完整详情（含源码）", en: "Show full detail of one submission (with source code)" }],
+    ],
+  },
+  solution: {
+    usage: "lc solution <slug> [选项]",
+    desc: { zh: "在终端查看题解：默认官方题解，Markdown 渲染（无需登录）", en: "Read solutions in the terminal: official by default, Markdown rendered (no login)" },
+    options: [
+      ["--list", { zh: "列出热门题解（官方置顶）", en: "List top solutions (official first)" }],
+      ["--id N|题解slug", { zh: "查看第 N 条（从 1 开始）或指定题解", en: "Open the Nth solution (1-based) or one by slug" }],
+      ["--raw", { zh: "输出原始 Markdown，可重定向存档", en: "Print raw Markdown (redirect to save)" }],
+      ["--lang L", { zh: "代码块只显示该语言，默认取 lc config lang", en: "Show only this language's code blocks; default from lc config lang" }],
+      ["--limit N", { zh: "--list 条数，默认 20，上限 100", en: "Rows for --list, default 20, max 100" }],
     ],
   },
 };
@@ -758,6 +769,91 @@ export async function cmdHistory(opts, deps) {
   out(renderHistoryTable(rows, { style: st, zh }));
 }
 
+export async function cmdSolution(opts, deps) {
+  const {
+    callTool: call = callTool, cwd, session = "", out = console.log,
+    warn = (s) => console.error(s), style: st = style, fetchImpl = fetch,
+  } = deps;
+  const zh = deps.zh ?? isChineseEnv();
+  const slug = opts.positionals[0];
+  if (!slug) throw new Error("用法：lc solution <slug> [--list] [--id N|题解slug] [--raw] [--lang L]");
+
+  const limit = Number(opts.flags.limit ?? 20);
+  if (!Number.isInteger(limit) || limit <= 0) throw new Error(`--limit 需为正整数，收到：${opts.flags.limit}`);
+  if (limit > 100) throw new Error(`--limit 不能超过 100，收到：${opts.flags.limit}`);
+
+  const lang = chooseLang(opts.flags, cwd);
+  if (!LANG_MAP[lang]) throw new Error(`不支持的语言：${lang}（支持：${Object.keys(LANG_MAP).join(", ")}）`);
+
+  // 空列表可能是题解真的没有，也可能是 slug 写错：用轻量查询确认题目是否存在
+  const noSolution = async () => {
+    await fetchQuestionId(slug, { session, fetchImpl });
+    out(zh ? `该题暂无题解：${slug}` : `No solutions for ${slug}`);
+  };
+
+  if (opts.flags.list) {
+    const data = await call("list_problem_solutions", { titleSlug: slug, limit }, { session, cwd });
+    const articles = data?.articles ?? [];
+    if (articles.length === 0) {
+      await noSolution();
+      return;
+    }
+    out(renderSolutionList(articles, { style: st, zh }));
+    if ((data?.total ?? 0) > articles.length) {
+      out(st.dim(zh
+        ? `共 ${data.total} 条，仅显示前 ${articles.length} 条（--limit 调整，--id 查看指定条）`
+        : `${data.total} total, showing ${articles.length} (use --limit / --id)`));
+    }
+    return;
+  }
+
+  // 定位目标题解：默认取官方（DEFAULT 排序总在首位），--id 支持序号或题解 slug
+  let target = null;
+  if (opts.flags.id !== undefined) {
+    const raw = String(opts.flags.id);
+    if (/^\d+$/.test(raw)) {
+      const n = Number(raw);
+      if (n < 1) throw new Error(`--id 需从 1 开始，收到：${raw}`);
+      if (n > 100) throw new Error(`--id 不能超过 100，收到：${raw}`);
+      const data = await call("list_problem_solutions", { titleSlug: slug, limit: n }, { session, cwd });
+      target = data?.articles?.[n - 1] ?? null;
+      if (!target) {
+        out(zh
+          ? `未找到第 ${raw} 条题解（该题共 ${data?.total ?? 0} 条，可用 --list 查看）`
+          : `Solution #${raw} not found (${data?.total ?? 0} total; try --list)`);
+        return;
+      }
+    } else {
+      target = { slug: raw, title: "", isOfficial: false };
+    }
+  } else {
+    const data = await call("list_problem_solutions", { titleSlug: slug, limit: 5 }, { session, cwd });
+    const articles = data?.articles ?? [];
+    if (articles.length === 0) {
+      await noSolution();
+      return;
+    }
+    target = articles.find((a) => a.isOfficial) ?? articles[0];
+    if (!target.isOfficial) {
+      warn(zh ? "提示：该题没有官方题解，已显示得票最高的社区题解" : "Hint: no official solution; showing the top-voted community one");
+    }
+  }
+
+  const article = await call("get_problem_solution", { slug: target.slug }, { session, cwd });
+  if (!String(article?.content ?? "").trim()) {
+    out(zh ? `题解正文为空：${target.slug}` : `Solution content is empty: ${target.slug}`);
+    return;
+  }
+  if (opts.flags.raw === true) {
+    out(article.content);
+    return;
+  }
+  out(renderSolutionArticle(
+    { ...article, title: article.title || target.title, isOfficial: article.isOfficial ?? target.isOfficial },
+    { style: st, zh, lang, titleSlug: slug },
+  ));
+}
+
 const PROJECT_NAME = "little-leetcode-cli";
 
 export function ensureProjectRoot(cwd) {
@@ -817,6 +913,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
       case "run":     await cmdRun(opts, { ...d, session }); break;
       case "submit":  await cmdSubmit(opts, { ...d, session }); break;
       case "history": await cmdHistory(opts, { ...d, session }); break;
+      case "solution": await cmdSolution(opts, { ...d, session }); break;
       case null:      printHelp(d.out, { zh: d.zh }); break;
       default:
         d.errOut(`未知命令：${opts.command}`);
